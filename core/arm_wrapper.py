@@ -3,7 +3,6 @@
 """
 
 import logging
-import time
 
 import transforms3d
 import numpy as np
@@ -22,7 +21,7 @@ from .utils import GREEN, YELLOW, BLUE, RED, RESET
 
 class ArmWrapper:
     """ 
-    机械臂控制封装类( 后续适配其他机械臂时, 只需要修改该类的实现, 不需要修改其他代码 )
+    机械臂控制封装类( 后续适配其他机械臂时, 只需要修改该类的实现即可, 不需要修改其他代码 )
     """
 
     class ControlMode:
@@ -79,7 +78,7 @@ class ArmWrapper:
     # end def __init__
 
     def __del__(self):
-        # Python 解释器退出阶段可能导致模块被卸载，析构里只做尽力清理并忽略异常
+        # Python 解释器退出阶段可能导致模块被卸载,析构里只做尽力清理并忽略异常
         try:
             if hasattr(self, 'arm') and self.arm is not None:
                 try:
@@ -118,9 +117,7 @@ class ArmWrapper:
 
         logging.info(f'Setting control mode to: {GREEN}[{control_mode}]{RESET}...')
 
-        ret = self.arm.set_control_mode(control_mode)
-
-        return ret["recv"] == "Task_Recieve"
+        return self.arm.set_control_mode(control_mode)
     # end def set_control_mode
 
     def set_speed_level(self, speed_level: int) -> bool:
@@ -134,9 +131,7 @@ class ArmWrapper:
 
         logging.info(f'Setting speed level to: {GREEN}[{speed_level}]{RESET}...')
 
-        ret = self.arm.set_speed_level(float(speed_level) / 10.0, 20)
-
-        return ret["recv"] == "Task_Recieve"
+        return self.arm.set_speed_level(float(speed_level) / 10.0, 20)
     # end def set_speed_level
 
     def get_joints(self) -> List[float]:
@@ -159,7 +154,7 @@ class ArmWrapper:
         """
 
         pose = self.arm.cart_pose  # 返回值为 List[float], 长度为7, [tx, ty, tz, qx, qy, qz, qw]
-        T_base_end = self._array_to_matrix(pose)
+        T_base_end = self.array_to_matrix(pose)
 
         return T_base_end
     # end def get_pose
@@ -205,13 +200,13 @@ class ArmWrapper:
         assert len(target_joints) == 6, "Joint angles must be a list of 6 elements."
 
         if move_line:
-            res = self.arm.move_line_joint(target_joints)
+            is_ok = self.arm.move_line_joint(target_joints)
         else:
-            res = self.arm.move_joint(target_joints, desire_time)
+            is_ok = self.arm.move_joint(target_joints, desire_time)
         # end if
 
-        if res["recv"] != "Task_Recieve":
-            logging.error(f'Failed to reach target joint angles: {target_joints}, res: {res}')
+        if not is_ok:
+            logging.error(f'Failed to reach target joint angles: {target_joints}')
             return False
 
         return True
@@ -229,16 +224,16 @@ class ArmWrapper:
             (bool): 设置是否成功
         """
 
-        target_pose = self._matrix_to_array(T_base_end)
+        target_pose = self.matrix_to_array(T_base_end)
 
         if move_line:
-            res = self.arm.move_line_pose(target_pose)
+            is_ok = self.arm.move_line_pose(target_pose)
         else:
-            res = self.arm.move_pose(target_pose)
+            is_ok = self.arm.move_pose(target_pose)
         # end if
 
-        if res["recv"] != "Task_Recieve":
-            logging.error(f'Failed to send pose to arm sdk: {target_pose}, res: {res}')
+        if not is_ok:
+            logging.error(f'Failed to send pose to arm sdk: {target_pose}')
             return False
         # end if
 
@@ -257,11 +252,11 @@ class ArmWrapper:
             (bool): 指令发送是否成功 
         """
 
-        target_pose = self._matrix_to_array(T_base_end)
+        target_pose = self.matrix_to_array(T_base_end)
 
-        res = self.arm.track_pose(target_pose, gripper_dist)
-        if res["recv"] != "Task_Recieve":
-            logging.error(f'Failed to send track pose command to arm sdk: {target_pose}, gripper_dist: {gripper_dist}, res: {res}')
+        is_ok = self.arm.track_pose(target_pose, gripper_dist)
+        if not is_ok:
+            logging.error(f'Failed to send track pose command to arm sdk: {target_pose}, gripper_dist: {gripper_dist}')
             return False
         # end if
 
@@ -282,10 +277,17 @@ class ArmWrapper:
             (bool): 是否设置成功
         """
 
-        res = self.arm.set_gripper(target_dist, grip_force)
+        is_ok = self.arm.set_gripper(target_dist, grip_force)
 
-        if res["recv"] != "Task_Recieve":
-            logging.error(f'Failed to send set gripper command to arm sdk: target_dist: {target_dist}, grip_force: {grip_force}, res: {res}')
+        if not is_ok:
+            logging.error(f'Failed to send set gripper command to arm sdk: target_dist: {target_dist}, grip_force: {grip_force}')
+            return False
+        # end if
+
+        current_dist = self.get_gripper_dist()
+        dist_err = abs(current_dist - target_dist)
+        if th_dist_err > 0 and dist_err > th_dist_err:
+            logging.error(f'Gripper distance( m ) error is too large: {dist_err:.4f}, target: {target_dist:.4f}, current: {current_dist:.4f}')
             return False
         # end if
 
@@ -313,29 +315,17 @@ class ArmWrapper:
 
         pose_list = []
         for T in T_base_end_list:
-            pose = self._matrix_to_array(T)
+            pose = self.matrix_to_array(T)
             pose_list.append(pose)
         # end for
 
-        res = self.arm.inverse_kine(pose_list, ref_joints_list)
-        if res["recv"] != "Task_Recieve":
-            logging.error(
-                f'Failed to send inverse kinematics command to arm sdk: pose_list: {pose_list}, ref_joints_list: {ref_joints_list}, res: {res}')
-            return [[]] * len(T_base_end_list)
-        # end if
-
-        joints_list = []
-        for i in range(len(T_base_end_list)):
-            key = f"joint{i+1}"
-            joints = res["data"].get(key, [])
-            joints_list.append(joints)
-        # end for
+        joints_list = self.arm.inverse_kine(pose_list, ref_joints_list)
 
         return joints_list
     # end def inverse_kinematics
 
-    def _array_to_matrix(self,
-                         pose: List[float]) -> np.ndarray:
+    @staticmethod
+    def array_to_matrix(pose: List[float]) -> np.ndarray:
         """
         将位姿列表转换为位姿矩阵    
         Args:
@@ -350,10 +340,10 @@ class ArmWrapper:
         T[:3, :3] = transforms3d.quaternions.quat2mat(q)
 
         return T
-    # end def _array_to_matrix
+    # end def array_to_matrix
 
-    def _matrix_to_array(self,
-                         T: np.ndarray) -> List[float]:
+    @staticmethod
+    def matrix_to_array(T: np.ndarray) -> List[float]:
         """
         将位姿矩阵转换为位姿列表    
         Args:
@@ -367,5 +357,5 @@ class ArmWrapper:
         pose = [p[0], p[1], p[2], q[1], q[2], q[3], q[0]]  # 四元数和位置 tx, ty, tz, qx, qy, qz, qw
 
         return pose
-    # end def _matrix_to_array
+    # end def matrix_to_array
 # end class ArmWrapper

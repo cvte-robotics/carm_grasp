@@ -11,11 +11,10 @@ from tf2_ros import TransformBroadcaster
 import argparse
 import os
 import sys
-import time
 import json
 import mmengine
 
-from typing_extensions import List, Tuple
+from typing_extensions import Tuple
 
 import numpy as np
 import cv2
@@ -46,11 +45,11 @@ from core.cam_ros_utils import CamNode
 
 ######################################################### 函数定义 #########################################################
 
-def compute_corners_3d(gray_img: np.ndarray,
-                       depth_img: np.ndarray,
-                       intrinsic: np.ndarray,
-                       distortion: np.ndarray,
-                       depth_scale: float) -> Tuple[np.ndarray, np.ndarray]:
+def compute_corners3d(gray_img: np.ndarray,
+                      depth_img: np.ndarray,
+                      intrinsic: np.ndarray,
+                      distortion: np.ndarray,
+                      depth_scale: float) -> Tuple[np.ndarray, np.ndarray]:
 
     # 畸变矫正
     K = np.array([[intrinsic[0], 0, intrinsic[2]],
@@ -150,10 +149,10 @@ def compute_corners_3d(gray_img: np.ndarray,
         return np.array([x, y, z])
     # end def compute_pt3d
 
-    corners_3d = np.array([compute_pt3d(corner, intrinsic, plane) for corner in corners])  # (4,3)
+    corners3d = np.array([compute_pt3d(corner, intrinsic, plane) for corner in corners])  # (4,3)
 
-    return corners_3d
-# end def compute_corners_3d
+    return corners3d
+# end def compute_corners3d
 
 
 ######################################################### 类定义 #########################################################
@@ -343,13 +342,13 @@ if __name__ == '__main__':
 
             gray_img = cv2.cvtColor(color_img, cv2.COLOR_BGR2GRAY)
 
-            corners_3d = compute_corners_3d(gray_img, depth_img, intrinsic, distortion, depth_scale)
-            if corners_3d is None:
+            corners3d = compute_corners3d(gray_img, depth_img, intrinsic, distortion, depth_scale)
+            if corners3d is None:
                 logging.error('failed to compute tag plane, skip this round')
                 continue
             # end if
 
-            gb.initialize(corners_3d)
+            gb.initialize(corners3d)
 
             calib_data['T_cam_gripper'] = gb.T_cam_gripper.tolist()
         # end if

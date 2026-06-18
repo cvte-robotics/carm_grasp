@@ -1,5 +1,12 @@
 """
 功能: 创建基于 AprilTag2 的 2D 抓取模板数据, 包含物体在图像上的位置和朝向信息, 以及机械臂末端位姿和夹爪距离等状态信息
+模板需要保存以下数据:
+- 1.末端刚好抓取到物体时的状态, 包含机械臂末端位姿和夹爪距离等信息
+- 2.相机距离物体较近时的状态, 包含机械臂末端位姿、夹爪距离、以及物体在图像上的位置和朝向等信息
+- 3.相机距离物体较近时的状态( 在 2 的基础上, 末端在 xy 平面平移一小段距离得到 ), 包含机械臂末端位姿、夹爪距离、以及物体在图像上的位置和朝向等信息
+- 4.相机距离物体较远时的状态, 包含机械臂末端位姿、夹爪距离、以及物体在图像上的位置和朝向等信息
+- 5.相机距离物体较远时的状态( 在 4 的基础上, 末端在 xy 平面平移一小段距离得到 ), 包含机械臂末端位姿、夹爪距离、以及物体在图像上的位置和朝向等信息
+
 """
 
 import argparse
@@ -9,16 +16,9 @@ import logging
 import time
 import json
 
-from typing_extensions import List, Tuple, Dict
-
 import cv2
-import numpy as np
-import transforms3d
 
 import rclpy
-
-# 导入第三方模块
-import apriltag2
 
 # 导入本工程的模块
 code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -27,12 +27,12 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
-    KeyboardReader, read_rgbd_params
+    KeyboardReader, read_cam_params
 )
 from core.arm_wrapper import ArmWrapper
 from core.arm_utils import compute_axis_aligned_pose
 from core.cam_ros_utils import CamNode
-from core.vision_utils import Matcher2D
+from core.vision_utils import TagMatcher2D
 
 
 ######################################################### 全局变量 #########################################################
@@ -44,14 +44,14 @@ from core.vision_utils import Matcher2D
 def save_state(cam_node: CamNode,
                arm: ArmWrapper,
                save_dir: str,
-               matcher: Matcher2D = None):
+               matcher: TagMatcher2D = None):
     """
     保存当前状态为模板文件
     Args:
         cam_node (CamNode): 相机 ROS2 节点
         arm (ArmWrapper): 机械臂对象
         save_dir (str): 保存路径
-        matcher (Matcher2D): 可选的 2D 匹配器对象, 若提供则会检测物体位置并保存到模板中
+        matcher (TagMatcher2D): 可选的 2D 匹配器对象, 若提供则会检测物体位置并保存到模板中
     """
 
     # 获取图像
@@ -134,20 +134,16 @@ if __name__ == '__main__':
 
     # 读取相机参数
     rgbd_params_path = os.path.join(root_dir, 'data/calib/cam_params.json')
-    intrinsic, distortion, _ = read_rgbd_params(rgbd_params_path)
+    intrinsic, distortion = read_cam_params(rgbd_params_path)
 
-    config = Matcher2D.Config(
+    config = TagMatcher2D.Config(
         intrinsic=intrinsic,
         distortion=distortion,
     )
-    matcher = Matcher2D(config)
+    matcher = TagMatcher2D(config)
 
     tmpl_dir = os.path.normpath(tmpl_dir)  # 规范化路径
     os.makedirs(tmpl_dir, exist_ok=True)
-
-    # 初始化 AprilTag2 检测器
-    detector = apriltag2.Detector()
-    logging.info(f'initialized apriltag2 detector')
 
     # 创建机械臂对象
     arm = ArmWrapper()
@@ -165,12 +161,13 @@ if __name__ == '__main__':
 
     print()
     logging.info(f'use keyboard to control: \n{BLUE}'
-                 f'  a: adjust arm z axis\n'
-                 f'  g: save grasp data\n'
-                 f'  n: save near( with object ) data\n'
-                 f'  b: save next near( with object ) data\n'
-                 f'  f: save far( with object ) data\n'
-                 f'  d: save next far( with object ) data\n{RESET}')
+                 f'  q: 退出程序\n'
+                 f'  a: 使末端的 z 轴方向与基座的 -z 轴平行\n'
+                 f'  g: 保存抓取时的状态\n'
+                 f'  n: 保存相机距离物体较近时的状态\n'
+                 f'  b: 保存下一个相机距离物体较近时的状态\n'
+                 f'  f: 保存相机距离物体较远时的状态\n'
+                 f'  d: 保存下一个相机距离物体较远时的状态\n{RESET}')
 
     while rclpy.ok():
 
@@ -183,7 +180,7 @@ if __name__ == '__main__':
         print()
 
         if key == 'a':   # 调整末端的 z 轴方向, 使它与基座的 z 轴平行
-            logging.info(f'{BLUE}start to adjust arm z axis ...{RESET}')
+            logging.info(f'{BLUE}调整末端的 z 轴方向 ...{RESET}')
 
             T_base_end = arm.get_pose()
             target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=-3, obj_axis_idx=3)
@@ -200,7 +197,7 @@ if __name__ == '__main__':
         # end if
 
         if key == 'g':  # 保存抓取时的状态
-            logging.info(f'{BLUE}start to save grasp data ...{RESET}')
+            logging.info(f'{BLUE}开始保存抓取时的状态 ...{RESET}')
 
             save_dir = os.path.join(tmpl_dir, 'grasp')
             os.makedirs(save_dir, exist_ok=True)
@@ -211,7 +208,7 @@ if __name__ == '__main__':
         # end if
 
         if key == 'n':  # 保存相机距离物体较近时的状态
-            logging.info(f'{BLUE}start to save near( with object ) data ...{RESET}')
+            logging.info(f'{BLUE}开始保存相机距离物体较近时的状态 ...{RESET}')
 
             save_dir = os.path.join(tmpl_dir, 'near')
             os.makedirs(save_dir, exist_ok=True)
@@ -223,7 +220,7 @@ if __name__ == '__main__':
         # end if
 
         if key == 'b':  # 保存相机距离物体较近时的状态, 即在当前位置的基础上在XY平面上移动一小段距离
-            logging.info(f'{BLUE}start to save next near( with object ) data ...{RESET}')
+            logging.info(f'{BLUE}开始保存下一个相机距离物体较近时的状态 ...{RESET}')
 
             save_dir = os.path.join(tmpl_dir, 'next_near')
             os.makedirs(save_dir, exist_ok=True)
@@ -235,7 +232,7 @@ if __name__ == '__main__':
         # end if
 
         if key == 'f':  # 保存相机距离物体较远时的状态
-            logging.info(f'{BLUE}start to save far( with object ) data ...{RESET}')
+            logging.info(f'{BLUE}开始保存相机距离物体较远时的状态 ...{RESET}')
 
             save_dir = os.path.join(tmpl_dir, 'far')
             os.makedirs(save_dir, exist_ok=True)
@@ -247,7 +244,7 @@ if __name__ == '__main__':
         # end if
 
         if key == 'd':  # 保存相机距离物体较远时的状态, 即在当前位置的基础上在XY平面上移动一小段距离
-            logging.info(f'{BLUE}start to save next far( with object ) data ...{RESET}')
+            logging.info(f'{BLUE}开始保存下一个相机距离物体较远时的状态 ...{RESET}')
 
             save_dir = os.path.join(tmpl_dir, 'next_far')
             os.makedirs(save_dir, exist_ok=True)

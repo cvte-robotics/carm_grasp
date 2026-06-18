@@ -211,8 +211,8 @@ def compute_projective_transformation(src_K: np.ndarray,
         [0, src_h - 1, 1.0],          # 左下
     ], dtype=np.float64).T  # (3,4)
 
-    src_rays = np.linalg.inv(src_K) @ corners    # (3,4)  角点在 src 相机坐标系中的射线（方向向量，未归一化）
-    dst_rays = R_dst_src @ src_rays              # (3,4)  角点在 dst 相机坐标系中的射线（方向向量，未归一化）
+    src_rays = np.linalg.inv(src_K) @ corners    # (3,4)  角点在 src 相机坐标系中的射线（方向向量,未归一化）
+    dst_rays = R_dst_src @ src_rays              # (3,4)  角点在 dst 相机坐标系中的射线（方向向量,未归一化）
 
     z = dst_rays[2, :]
     if np.any(z <= 1e-6):
@@ -315,6 +315,7 @@ def compute_tag_corners3d(tag: apriltag2.Tag2D,
         depth_img (np.ndarray): 深度图像
         intrinsic (np.ndarray): 相机内参矩阵
         depth_scale (float): 深度缩放因子
+        ex_ratio (float): 外延比例, 用于扩展标签的边界以获取更多的深度信息, 例如 ex_ratio=0.1 表示将标签边界向外扩展 10% 的距离
     Returns:
         (np.ndarray): 标签的 3D 角点坐标, (4,3) 格式
     """
@@ -485,7 +486,7 @@ class ImageUndistorter:
 # end class ImageUndistorter
 
 
-class Matcher2D:
+class TagMatcher2D:
     """
     2D 匹配器, 用于标签识别和平面位姿估计( tx,ty,theta )
     """
@@ -493,7 +494,7 @@ class Matcher2D:
     @dataclasses.dataclass
     class Config:
         """
-        配置类, 用于存储 Matcher2D 的配置参数
+        配置类, 用于存储 TagMatcher2D 的配置参数
         """
 
         intrinsic: List[float]
@@ -537,7 +538,7 @@ class Matcher2D:
                  config: Config):
         """
         Args:
-            config ( Config ): Matcher2D 的配置对象, 包含了物体检测和位姿估计所需的各种参数
+            config ( Config ): TagMatcher2D 的配置对象, 包含了物体检测和位姿估计所需的各种参数
         """
 
         # 相机参数
@@ -554,7 +555,7 @@ class Matcher2D:
             logging.info(f"debug results will be saved to: {GREEN}{self.debug_dir}{RESET}")
         # end if
 
-        logging.info("Matcher2D initialized")
+        logging.info("TagMatcher2D initialized")
     # end def __init__
 
     def match(self,
@@ -633,10 +634,10 @@ class Matcher2D:
 
         # end for
     # end def draw
-# end Matcher2D
+# end TagMatcher2D
 
 
-class Matcher3D:
+class TagMatcher3D:
     """
     3D 匹配器, 用于标签识别和位姿估计
     """
@@ -644,7 +645,7 @@ class Matcher3D:
     @dataclasses.dataclass
     class Config:
         """
-        配置类, 用于存储 Matcher3D 的配置参数
+        配置类, 用于存储 TagMatcher3D 的配置参数
         """
 
         intrinsic: List[float]
@@ -690,7 +691,7 @@ class Matcher3D:
                  config: Config):
         """
         Args:
-            config ( Config ): Matcher3D 的配置对象, 包含了物体检测和位姿估计所需的各种参数
+            config ( Config ): TagMatcher3D 的配置对象, 包含了物体检测和位姿估计所需的各种参数
         """
 
         # RGB-D 相机参数
@@ -710,7 +711,7 @@ class Matcher3D:
             logging.info(f"debug results will be saved to: {GREEN}{self.debug_dir}{RESET}")
         # end if
 
-        logging.info("Matcher3D initialized")
+        logging.info("TagMatcher3D initialized")
     # end def __init__
 
     def match(self,
@@ -854,4 +855,4 @@ class Matcher3D:
         msg = "track successful"
         return T_cam_tag, msg
     # end def track
-# end class Matcher3D
+# end class TagMatcher3D

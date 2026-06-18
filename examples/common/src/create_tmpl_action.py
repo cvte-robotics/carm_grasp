@@ -10,7 +10,7 @@ import logging
 import time
 import json
 
-from typing_extensions import List, Tuple, Dict
+from typing_extensions import List, Tuple
 
 import numpy as np
 
@@ -55,6 +55,8 @@ def save_action(arm: ArmWrapper,
         'joints': joints,
         'gripper_dist': gripper_dist
     }
+
+    logging.info(f'joints: {GREEN}{joints}{RESET} ...')
 
     # 保存模板数据
     with open(file_path, 'w') as f:
@@ -131,18 +133,20 @@ if __name__ == '__main__':
         logging.error(f'{RED}failed to connect to arm, exiting {RESET}')
         exit(1)
     # end if
+    # arm.set_speed_level(10)
 
     # 主循环
     print()
     logging.info(f'use keyboard to control: \n{BLUE}'
-                 f'  q: quit \n'
-                 f'  a: align arm_end z axis to arm_base -z axis \n'
-                 f'  b: align arm_end x axis to arm_base z axis \n'
-                 f'  >: go to next tmpl \n'
-                 f'  <: go to previous tmpl \n'
-                 f'  e: execute current tmpl \n'
-                 f'  s: save current tmpl \n'
-                 f'  d: delete current tmpl \n{RESET}')
+                 f'  q: 退出 \n'
+                 f'  z: 位置控制模式 \n'
+                 f'  x: 拖动模式 \n'
+                 f'  a: 对齐 arm_end z 轴到 arm_base -z 轴 \n'
+                 f'  >: 转到下一个模板 \n'
+                 f'  <: 转到上一个模板 \n'
+                 f'  e: 执行当前模板 \n'
+                 f'  s: 保存当前模板 \n'
+                 f'  d: 删除当前模板 \n{RESET}')
 
     current_tmpl_idx = 0
     while True:
@@ -160,8 +164,26 @@ if __name__ == '__main__':
             break
         # end if
 
+        if key == 'z':
+            logging.info(f'{BLUE}切换到位置控制模式 ...{RESET}')
+            is_ok = arm.set_control_mode(ArmWrapper.ControlMode.POSITION)
+            if not is_ok:
+                logging.warning(f'{YELLOW}切换到位置控制模式失败{RESET}')
+            # end if
+            print()
+        # end if
+
+        if key == 'x':
+            logging.info(f'{BLUE}切换到拖动模式 ...{RESET}')
+            is_ok = arm.set_control_mode(ArmWrapper.ControlMode.TEACH)
+            if not is_ok:
+                logging.warning(f'{YELLOW}切换到拖动模式失败{RESET}')
+            # end if
+            print()
+        # end if
+
         if key == 'a':
-            logging.info(f'{BLUE}start to align arm_end z axis to arm_base -z axis ...{RESET}')
+            logging.info(f'{BLUE}开始对齐 arm_end z 轴到 arm_base -z 轴 ...{RESET}')
 
             T_base_end = arm.get_pose()
             target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=-3, obj_axis_idx=3)
@@ -169,27 +191,10 @@ if __name__ == '__main__':
                 continue
             # end if
 
-            logging.info(f'try move to new T_base_end:\n{target_T_base_end}')
+            logging.info(f'尝试移动到 T_base_end:\n{target_T_base_end}')
             is_ok = arm.set_pose(target_T_base_end)
             if not is_ok:
-                logging.warning('failed to move to new T_base_end')
-            # end if
-            print()
-        # end if
-
-        if key == 'b':
-            logging.info(f'{BLUE}start to align arm_end x axis to arm_base z axis ...{RESET}')
-
-            T_base_end = arm.get_pose()
-            target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=3, obj_axis_idx=1)
-            if target_T_base_end is None:
-                continue
-            # end if
-
-            logging.info(f'try move to new T_base_end:\n{target_T_base_end}')
-            is_ok = arm.set_pose(target_T_base_end)
-            if not is_ok:
-                logging.warning('failed to move to new T_base_end')
+                logging.warning('移动到 T_base_end 失败')
             # end if
             print()
         # end if
@@ -198,38 +203,38 @@ if __name__ == '__main__':
 
         if key == '.':   # 注意: 键盘上是 > 键, 但是输入时是 . 键
             if not os.path.exists(file_path):
-                logging.warning(f'{YELLOW}current tmpl not found, idx: [{current_tmpl_idx}], cannot go to next tmpl{RESET}')
+                logging.warning(f'{YELLOW}当前模板未找到, idx: [{current_tmpl_idx}], 无法转到下一个模板{RESET}')
                 continue
             # end if
 
             current_tmpl_idx += 1
-            logging.info(f'{BLUE}go to next tmpl, idx: [{current_tmpl_idx}]{RESET}')
+            logging.info(f'{BLUE}转到下一个模板, idx: [{current_tmpl_idx}]{RESET}')
         # end if
 
         if key == ',':   # 注意: 键盘上是 < 键, 但是输入时是 , 键
             if current_tmpl_idx == 0:
-                logging.warning(f'{YELLOW}already at first tmpl, cannot go back{RESET}')
+                logging.warning(f'{YELLOW}已经是第一个模板, 无法返回{RESET}')
                 continue
             # end if
 
             current_tmpl_idx -= 1
-            logging.info(f'{BLUE}go to previous tmpl, idx: [{current_tmpl_idx}]{RESET}')
+            logging.info(f'{BLUE}转到上一个模板, idx: [{current_tmpl_idx}]{RESET}')
         # end if
 
         if key == 'e':
-            logging.info(f'{BLUE}execute tmpl, idx: [{current_tmpl_idx}]{RESET}')
+            logging.info(f'{BLUE}执行当前模板, idx: [{current_tmpl_idx}]{RESET}')
 
             if not os.path.exists(file_path):
-                logging.warning(f'{YELLOW}tmpl not found, idx: [{current_tmpl_idx}]{RESET}')
+                logging.warning(f'{YELLOW}当前模板未找到, idx: [{current_tmpl_idx}]{RESET}')
                 continue
             # end if
 
             T_base_end, joints, gripper_dist = load_action(file_path)
 
-            logging.info(f'try execute tmpl, idx: [{current_tmpl_idx}] ...{RESET}')
+            logging.info(f'尝试执行当前模板, idx: [{current_tmpl_idx}] ...{RESET}')
             is_ok = arm.set_joints(joints)
             if not is_ok:
-                logging.warning(f'{YELLOW}failed to move to tmpl joints{RESET}')
+                logging.warning(f'{YELLOW}移动到模板关节位置失败{RESET}')
                 continue
             # end if
 
@@ -237,34 +242,35 @@ if __name__ == '__main__':
 
             is_ok = arm.set_control_mode(ArmWrapper.ControlMode.POSITION)
             if not is_ok:
-                logging.warning(f'{YELLOW}failed to switch to position control mode{RESET}')
+                logging.warning(f'{YELLOW}切换到位置控制模式失败{RESET}')
                 continue
             # end if
 
             is_ok = arm.set_gripper_dist(gripper_dist)
             if not is_ok:
-                logging.warning(f'{YELLOW}failed to move to tmpl gripper dist{RESET}')
+                logging.warning(f'{YELLOW}移动到模板夹爪距离失败{RESET}')
                 continue
             # end if
         # end if
 
         if key == 's':
-            logging.info(f'{BLUE}save tmpl, idx: [{current_tmpl_idx}]{RESET}')
+            logging.info(f'{BLUE}保存模板, idx: [{current_tmpl_idx}]{RESET}')
 
             file_path = os.path.join(tmpl_dir, f'{current_tmpl_idx}.json')
             save_action(arm, file_path)
         # end if
 
         if key == 'd':
-            logging.info(f'{BLUE}delete tmpl, idx: [{current_tmpl_idx}]{RESET}')
+            logging.info(f'{BLUE}删除模板, idx: [{current_tmpl_idx}]{RESET}')
 
             file_path = os.path.join(tmpl_dir, f'{current_tmpl_idx}.json')
             if os.path.exists(file_path):
                 os.remove(file_path)
-                logging.info(f'{BLUE}deleted tmpl, idx: [{current_tmpl_idx}]{RESET}')
+                logging.info(f'{BLUE}已删除模板, idx: [{current_tmpl_idx}]{RESET}')
             else:
-                logging.warning(f'{RED}tmpl not found, idx: [{current_tmpl_idx}]{RESET}')
+                logging.warning(f'{RED}模板未找到, idx: [{current_tmpl_idx}]{RESET}')
             # end if
         # end if
     # end while
+
 # end if __name__ == '__main__'

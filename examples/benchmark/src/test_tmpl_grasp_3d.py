@@ -15,7 +15,6 @@ import mmengine
 from typing_extensions import List, Tuple, Dict
 
 import numpy as np
-import transforms3d
 
 
 # 导入本工程的模块
@@ -36,7 +35,6 @@ from core.arm_utils import (
     TH_ANGLE_Z,
     TH_GRIPPER_HEIGHT,
     GripperBody,
-    CollisionDetector,
     check_arm_pose,
 )
 
@@ -50,13 +48,10 @@ from core.vision_utils import (
     compute_locate_error
 )
 
-from core.vision_utils import Matcher3D, depth_mean_filter
+from core.vision_utils import TagMatcher3D, depth_mean_filter
 
 
 ######################################################### 全局常量( 仅本文件使用 ) #########################################################
-
-CHECK_HEIGHT = 0.18
-"""检查位姿时物体到相机的垂直距离, 单位: 米"""
 
 
 ######################################################### 函数定义 #########################################################
@@ -71,39 +66,7 @@ def read_tmpl_grasp(tmpl_dir: str) -> Dict:
         (Dict): 抓取模板数据字典
     """
 
-    # 1. 读取相机处于检测位置时的机械臂状态
-    detect_path = os.path.join(tmpl_dir, 'detect.json')
-    if not os.path.exists(detect_path):
-        logging.error(f'file not found: {detect_path}')
-        return None
-    # end if
-
-    with open(detect_path, 'r') as f:
-        detect_dict = json.load(f)
-    # end with
-    detect_T_base_end = np.array(detect_dict['T_base_end'], dtype=np.float32)
-    detect_joints = detect_dict["joints"]
-    detect_gripper_dist = detect_dict["gripper_dist"]
-    logging.info(f'arm detect_joints: {detect_joints}')
-    logging.info(f'arm detect_gripper_dist: {detect_gripper_dist}')
-
-    # 2. 读取相机处于放置位置时的机械臂状态
-    place_path = os.path.join(tmpl_dir, 'place.json')
-    if not os.path.exists(place_path):
-        logging.error(f'file not found: {place_path}')
-        return None
-    # end if
-
-    with open(place_path, 'r') as f:
-        place_dict = json.load(f)
-    # end with
-    place_T_base_end = np.array(place_dict['T_base_end'], dtype=np.float32)
-    place_joints = place_dict["joints"]
-    place_gripper_dist = place_dict["gripper_dist"]
-    logging.info(f'arm place_joints: {place_joints}')
-    logging.info(f'arm place_gripper_dist: {place_gripper_dist}')
-
-    # 3. 读取抓取模板位姿
+    # 1. 读取抓取位姿
     grasp_path = os.path.join(tmpl_dir, 'grasp.json')
     if not os.path.exists(grasp_path):
         logging.warning(f'file not found: {grasp_path}')
@@ -117,7 +80,7 @@ def read_tmpl_grasp(tmpl_dir: str) -> Dict:
     grasp_T_base_end = np.array(grasp_data['T_base_end'], dtype=np.float32)
     grasp_gripper_dist = grasp_data['gripper_dist']
 
-    # 4. 读取预备位姿数据,以及根据预备位姿数据构建抓取模板列表
+    # 2. 读取预备位姿
     ready_path = os.path.join(tmpl_dir, 'ready.json')
     if not os.path.exists(ready_path):
         logging.warning(f'file not found: {ready_path}')
@@ -132,14 +95,6 @@ def read_tmpl_grasp(tmpl_dir: str) -> Dict:
     ready_T_cam_model = np.array(ready_data['T_cam_model'], dtype=np.float32)
 
     tmpl_dict = {
-        'detect_T_base_end': detect_T_base_end,
-        'detect_joints': detect_joints,
-        'detect_gripper_dist': detect_gripper_dist,
-
-        'place_T_base_end': place_T_base_end,
-        'place_joints': place_joints,
-        'place_gripper_dist': place_gripper_dist,
-
         'grasp_T_base_end': grasp_T_base_end,
         'grasp_gripper_dist': grasp_gripper_dist,
 
@@ -179,13 +134,13 @@ def compute_ready_pose(T_end_cam: np.ndarray,
 
 
 def match(cam_node: CamNode,
-          matcher: Matcher3D,
+          matcher: TagMatcher3D,
           debug_level: int) -> np.ndarray:
     """
     匹配物体并返回位姿
     Args:
         cam_node (CamNode): 相机节点
-        matcher (Matcher3D): 3D 匹配器
+        matcher (TagMatcher3D): 3D 匹配器
         debug_level (int): 调试级别
     Returns:
         (np.ndarray): 匹配得到的从物体到相机的变换矩阵
@@ -216,14 +171,14 @@ def match(cam_node: CamNode,
 
 
 def track(cam_node: CamNode,
-          matcher: Matcher3D,
+          matcher: TagMatcher3D,
           init_T_cam_model: np.ndarray,
           debug_level: int) -> np.ndarray:
     """
     跟踪物体并返回位姿
     Args:
         cam_node (CamNode): 相机节点
-        matcher (Matcher3D): 3D 匹配器
+        matcher (TagMatcher3D): 3D 匹配器
         init_T_cam_model (np.ndarray): 初始的从物体到相机的变换矩阵, 4*4
         debug_level (int): 调试级别
     Returns:
@@ -258,7 +213,7 @@ def do_grasp(T_end_cam: np.ndarray,
              arm: ArmWrapper,
              cam_node: CamNode,
              arm_node: TargetArmNode,
-             matcher: Matcher3D,
+             matcher: TagMatcher3D,
              debug_level: int,
              debug: bool = False) -> bool:
     """
@@ -269,7 +224,7 @@ def do_grasp(T_end_cam: np.ndarray,
         arm (ArmWrapper): 机械臂
         cam_node (CamNode): 相机节点
         arm_node (TargetArmNode): 机械臂目标节点
-        matcher (Matcher3D): 3D 匹配器
+        matcher (TagMatcher3D): 3D 匹配器
         debug_level (int): 调试级别
         debug (bool): 是否启用调试模式, 启用后会在每个步骤等待用户按键确认, 并显示更多日志信息
     Returns:
@@ -503,9 +458,9 @@ def do_grasp(T_end_cam: np.ndarray,
         return False
     # end if
 
-    ######## 11. 抓取 ########
+    ######## 6. 抓取 ########
     print()
-    logging.info(f'grasp-step [11] , {BLUE}move to grasp pose{RESET}')
+    logging.info(f'grasp-step [6] , {BLUE}move to grasp pose{RESET}')
     if not wait_key(debug):
         return False
     # end if
@@ -542,21 +497,19 @@ def do_grasp(T_end_cam: np.ndarray,
 def run(T_end_cam: np.ndarray,
         gripper_body: GripperBody,
         tmpl_dict: Dict,
+        detect_T_base_end: np.ndarray,
+        place_T_base_end: np.ndarray,
         arm: ArmWrapper,
         cam_node: CamNode,
         arm_node: TargetArmNode,
-        matcher: Matcher3D,
+        matcher: TagMatcher3D,
         debug_level: int,
         debug: bool = False):
     """
     循环执行 3D 抓取任务    
     """
 
-    detect_joints = tmpl_dict['detect_joints']               # 机械臂处于检测状态时的位置关节角度
-    detect_gripper_dist = tmpl_dict['detect_gripper_dist']   # 机械臂处于检测状态时的夹爪位置
-    place_T_base_end = tmpl_dict['place_T_base_end']         # 机械臂处于放置状态时的末端位姿
-    place_joints = tmpl_dict['place_joints']                 # 机械臂处于放置状态时的位置关节角度
-    place_gripper_dist = tmpl_dict['place_gripper_dist']     # 机械臂处于放置状态时的夹爪位置
+    max_gripper_dist = 0.08
 
     while rclpy.ok():
 
@@ -569,13 +522,12 @@ def run(T_end_cam: np.ndarray,
         # end if
 
         logging.info(f"{GREEN}try move arm to detect pose...{RESET}")
-        is_ok = arm.set_gripper_dist(detect_gripper_dist)
+        is_ok = arm.set_gripper_dist(max_gripper_dist)
         if not is_ok:
             logging.error(f"{RED}set gripper to detect pose failed.{RESET}")
             break
         # end if
 
-        detect_T_base_end = tmpl_dict['detect_T_base_end']
         is_ok = arm.set_pose(detect_T_base_end)
         if not is_ok:
             logging.error(f"{RED}move arm to detect pose failed, try again.{RESET}")
@@ -621,14 +573,14 @@ def run(T_end_cam: np.ndarray,
             break
         # end if
 
-        is_ok = arm.set_joints(place_joints)
+        is_ok = arm.set_pose(place_T_base_end)
         if not is_ok:
             logging.error(f"{RED}move arm to place pose failed.{RESET}")
             break
         # end if
 
         # 打开夹爪
-        is_ok = arm.set_gripper_dist(place_gripper_dist)
+        is_ok = arm.set_gripper_dist(max_gripper_dist)
         if not is_ok:
             logging.error(f"{RED}open gripper to place pose failed.{RESET}")
             break
@@ -659,6 +611,12 @@ if __name__ == '__main__':
 
     parser.add_argument("--tmpl_dir", type=str, required=True,
                         help="模板文件的目录")
+    
+    parser.add_argument("--detect_pose", type=str, required=True,
+                        help="检测状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+
+    parser.add_argument("--place_pose", type=str, required=True,
+                        help="放置状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
 
     parser.add_argument("--debug", action='store_true',
                         help="是否开启调试模式")
@@ -682,6 +640,12 @@ if __name__ == '__main__':
         sys.exit(-1)
     # end if
 
+    detect_pose = json.loads(args.detect_pose)
+    detect_T_base_end = ArmWrapper.array_to_matrix(detect_pose)
+
+    place_pose = json.loads(args.place_pose)
+    place_T_base_end = ArmWrapper.array_to_matrix(place_pose)
+
     debug = args.debug
     debug_level = 0
     if debug is True:
@@ -692,6 +656,8 @@ if __name__ == '__main__':
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
     print(f"depth image topic: {BLUE}{depth_img_topic}{RESET}")
     print(f'load grasp template from: {BLUE}{tmpl_dir}{RESET}')
+    print(f'detect pose: {BLUE}{detect_pose}{RESET}')
+    print(f'place pose: {BLUE}{place_pose}{RESET}')
     print(f'enable debug mode: {BLUE}{debug}{RESET}')
     print(f'debug level: {BLUE}{debug_level}{RESET}')
     print()
@@ -756,12 +722,12 @@ if __name__ == '__main__':
     # end if
 
     # 初始化匹配器
-    config = Matcher3D.Config(
+    config = TagMatcher3D.Config(
         intrinsic=intrinsic,
         depth_scale=depth_scale,
         distortion=distortion,
     )
-    matcher = Matcher3D(config)
+    matcher = TagMatcher3D(config)
 
     # 初始化 ROS2 节点
     rclpy.init(args=None)
@@ -773,6 +739,8 @@ if __name__ == '__main__':
     run(T_end_cam=T_end_cam,
         gripper_body=gripper_body,
         tmpl_dict=tmpl_dict,
+        detect_T_base_end=detect_T_base_end,
+        place_T_base_end=place_T_base_end,
         arm=arm,
         cam_node=cam_node,
         arm_node=arm_node,

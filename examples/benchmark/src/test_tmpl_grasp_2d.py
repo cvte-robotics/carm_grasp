@@ -11,14 +11,11 @@ import json
 
 from typing_extensions import List, Tuple, Dict
 
-import cv2
 import numpy as np
 import transforms3d
 
 import rclpy
 
-# 导入第三方模块
-import apriltag2
 
 # 导入本工程的模块
 code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -27,13 +24,13 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
-    wait_key,
-    reset_empty_str, inv_tf, read_rgbd_params, read_handeye_calib
+    wait_key, inv_tf, read_cam_params, read_handeye_calib
 )
 from core.arm_wrapper import ArmWrapper
+from core.arm_utils import compute_axis_aligned_pose
 from core.arm_ros_utils import TargetArmNode
 from core.cam_ros_utils import CamNode
-from core.vision_utils import Matcher2D
+from core.vision_utils import TagMatcher2D
 
 
 ######################################################### 全局变量 #########################################################
@@ -114,7 +111,7 @@ def read_tmpl_grasp_2d(tmpl_dir: str) -> Dict:
 
 
 def transform_pose_2d(R_dst_src: np.ndarray,
-                      src_pose_2d: List[float],) -> np.ndarray:
+                      src_pose_2d: List[float]) -> np.ndarray:
     """将物体在 src 像素坐标系下的位姿转换到 dst 归一化坐标系下的位姿
     Args:
         R_dst_src (np.ndarray): 从 src 坐标系到 dst 坐标系的旋转矩阵 (3,3)
@@ -126,8 +123,10 @@ def transform_pose_2d(R_dst_src: np.ndarray,
     # 为便于区分, 这里将三维空间中的位移用 xyz 表示, 将归一化坐标中的位移用 nx,ny 表示, 图像/归一化坐标中的旋转用 theta 表示
 
     src_nx, src_ny, src_theta = src_pose_2d
-    delta_src_nx = src_nx + 10.0 * np.cos(src_theta)
-    delta_src_ny = src_ny + 10.0 * np.sin(src_theta)
+
+    step = 0.01  # 用于计算物体朝向的辅助点与物体中心的距离, 单位为归一化坐标系下的距离, 这个值必须足够小, 以保证物体朝向的计算足够精确, 但又不能太小, 以避免数值误差的影响
+    delta_src_nx = src_nx + step * np.cos(src_theta)
+    delta_src_ny = src_ny + step * np.sin(src_theta)
 
     src_pts = np.array([
         [src_nx, src_ny, 1.0],
@@ -200,14 +199,14 @@ def compute_delta_end_pose(T_end_cam: np.ndarray,
 
     # 计算 ready 和 detect 两个时刻的平移与归一化坐标增量, 以及它们的比值
     near_z = near_T_base_virtual[2, 3]
-    near_delta_xy = (inv_tf(near_T_base_virtual) @ next_near_T_base_virtual)[0:2, 3]     # 1 时刻末端在 0 时刻坐标系下的平移
-    near_delta_uv = next_near_virtual_pose_2d[:2] - near_virtual_pose_2d[:2]               # 0-->>1 物体在虚拟相机上的归一化坐标增量
-    near_ratio = np.linalg.norm(near_delta_xy) / (np.linalg.norm(near_delta_uv) + 1e-6)  # 平移与归一化坐标增量的比值
+    near_delta_xy = (inv_tf(near_T_base_virtual) @ next_near_T_base_virtual)[0:2, 3]      # 1 时刻末端在 0 时刻坐标系下的平移
+    near_delta_uv = next_near_virtual_pose_2d[:2] - near_virtual_pose_2d[:2]              # 0-->>1 物体在虚拟相机上的归一化坐标增量
+    near_ratio = np.linalg.norm(near_delta_xy) / (np.linalg.norm(near_delta_uv) + 1e-6)   # 平移与归一化坐标增量的比值
 
     far_z = far_T_base_virtual[2, 3]
-    far_delta_xy = (inv_tf(far_T_base_virtual) @ next_far_T_base_virtual)[0:2, 3]     # 1 时刻末端在 0 时刻坐标系下的平移
+    far_delta_xy = (inv_tf(far_T_base_virtual) @ next_far_T_base_virtual)[0:2, 3]       # 1 时刻末端在 0 时刻坐标系下的平移
     far_delta_uv = next_far_virtual_pose_2d[:2] - far_virtual_pose_2d[:2]               # 0-->>1 物体在虚拟相机上的归一化坐标增量
-    far_ratio = np.linalg.norm(far_delta_xy) / (np.linalg.norm(far_delta_uv) + 1e-6)  # 平移与归一化坐标增量的比值
+    far_ratio = np.linalg.norm(far_delta_xy) / (np.linalg.norm(far_delta_uv) + 1e-6)    # 平移与归一化坐标增量的比值
 
     # 计算虚拟相机的旋转增量
     delta_theta = cur_virtual_pose_2d[2] - near_virtual_pose_2d[2]
@@ -258,7 +257,7 @@ def compute_delta_end_pose(T_end_cam: np.ndarray,
 
 def do_grasp(T_end_cam: np.ndarray,
              tmpl_dict: Dict,
-             matcher: Matcher2D,
+             matcher: TagMatcher2D,
              arm: ArmWrapper,
              cam_node: CamNode,
              arm_node: TargetArmNode,
@@ -275,7 +274,7 @@ def do_grasp(T_end_cam: np.ndarray,
     near_T_base_end = tmpl_dict['near_T_base_end']
     final_T_end = inv_tf(near_T_base_end) @ grasp_T_base_end
 
-    max_try_cnt = 10
+    max_try_cnt = 20
     try_cnt = 0
     while rclpy.ok():
         ######## 1. 检测物体 ########
@@ -302,6 +301,7 @@ def do_grasp(T_end_cam: np.ndarray,
         # end if
 
         cur_obj_pose_2d = result_list[0].pose_2d
+        logging.info(f'detected obj_pose_2d: {cur_obj_pose_2d}')
 
         # 计算目标末端位姿增量
         cur_T_base_end = arm.get_pose()
@@ -317,6 +317,11 @@ def do_grasp(T_end_cam: np.ndarray,
         if delta_dist < 0.0005 and delta_angle < 1.0 / 180.0 * np.pi:
             logging.info(f'delta_T_end is small enough, no need to move, break detecting loop')
             break
+        # end if
+
+        if delta_dist < 0.01:
+            delta_T_end[0:3, 3] = delta_T_end[0:3, 3] * 0.5  # 距离目标很近时,需要缩小增量, 避免过冲
+            time.sleep(0.2)  # 如果增量较小, 则先等待一段时间再执行下一个循环, 避免频繁地发送小增量的控制命令
         # end if
 
         target_T_base_end = cur_T_base_end @ delta_T_end
@@ -393,17 +398,23 @@ def do_grasp(T_end_cam: np.ndarray,
 
 def run(T_end_cam: np.ndarray,
         tmpl_dict: Dict,
+        detect_T_base_end: np.ndarray,
+        place_T_base_end: np.ndarray,
         cam_node: CamNode,
         arm_node: TargetArmNode,
-        matcher: Matcher2D,
+        matcher: TagMatcher2D,
         arm: ArmWrapper,
         debug: bool = False):
     """
     执行平面上物体抓取任务
     """
 
-    near_gripper_dist = tmpl_dict['near_gripper_dist']
-    far_T_base_end = tmpl_dict['far_T_base_end']
+    max_gripper_dist = 0.08
+    initial_T_base_end = compute_axis_aligned_pose(detect_T_base_end, base_axis_idx=-3, obj_axis_idx=3)  # 机械臂末端坐标系的 z 轴与基座的 -z 轴平行的位姿
+    if initial_T_base_end is None:
+        logging.error(f'{RED}failed to compute initial_T_base_end, exiting...{RESET}')
+        return
+    # end if
 
     while rclpy.ok():
         print(f"\n{GREEN}start loop {RESET}")
@@ -416,13 +427,13 @@ def run(T_end_cam: np.ndarray,
         # end if
 
         logging.info(f"{GREEN}try move arm to detect pose...{RESET}")
-        is_ok = arm.set_gripper_dist(near_gripper_dist)
+        is_ok = arm.set_gripper_dist(max_gripper_dist)
         if not is_ok:
             logging.error(f"{RED}set gripper to ready dist failed.{RESET}")
             break
         # end if
 
-        is_ok = arm.set_pose(far_T_base_end)
+        is_ok = arm.set_pose(initial_T_base_end)
         if not is_ok:
             logging.error(f"{RED}move arm to detect pose failed{RESET}")
             break
@@ -447,8 +458,15 @@ def run(T_end_cam: np.ndarray,
             break
         # end if
 
+        # 移动到放置位置
+        is_ok = arm.set_pose(place_T_base_end)
+        if not is_ok:
+            logging.error(f"{RED}move arm to place pose failed{RESET}")
+            break
+        # end if
+
         # 打开夹爪
-        is_ok = arm.set_gripper_dist(near_gripper_dist)
+        is_ok = arm.set_gripper_dist(max_gripper_dist)
         if not is_ok:
             logging.error(f"{RED}open gripper failed.{RESET}")
             break
@@ -469,7 +487,13 @@ if __name__ == '__main__':
 
     parser.add_argument("--tmpl_dir", type=str,
                         help="模板文件的目录")
-    
+
+    parser.add_argument("--detect_pose", type=str, required=True,
+                        help="检测状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+
+    parser.add_argument("--place_pose", type=str, required=True,
+                        help="放置状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+
     parser.add_argument("--debug", action='store_true',
                         help="是否开启调试模式")
 
@@ -487,24 +511,32 @@ if __name__ == '__main__':
         exit(1)
     # end if
 
+    detect_pose = json.loads(args.detect_pose)
+    detect_T_base_end = ArmWrapper.array_to_matrix(detect_pose)
+
+    place_pose = json.loads(args.place_pose)
+    place_T_base_end = ArmWrapper.array_to_matrix(place_pose)
+
     debug = args.debug
 
     print()
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
-    print(f'grasp_2d template will be loaded from: {GREEN}{tmpl_dir}{RESET}')
+    print(f'grasp_2d template dir: {BLUE}{tmpl_dir}{RESET}')
+    print(f'detect pose: {BLUE}{detect_pose}{RESET}')
+    print(f'place pose: {BLUE}{place_pose}{RESET}')
     print(f"debug: {BLUE}{debug}{RESET}")
     print()
 
     # 读取相机参数
     rgbd_params_path = os.path.join(root_dir, 'data/calib/cam_params.json')
-    intrinsic, distortion, _ = read_rgbd_params(rgbd_params_path)
+    intrinsic, distortion = read_cam_params(rgbd_params_path)
 
     # 初始化匹配器
-    config = Matcher2D.Config(
+    config = TagMatcher2D.Config(
         intrinsic=intrinsic,
         distortion=distortion,
     )
-    matcher = Matcher2D(config)
+    matcher = TagMatcher2D(config)
 
     # 读取手眼标定结果
     handeye_calib_path = os.path.join(root_dir, 'data/calib/calib_handeye.json')
@@ -518,14 +550,23 @@ if __name__ == '__main__':
         exit(1)
     # end if
 
-    # 初始化 AprilTag2 检测器
-    detector = apriltag2.Detector()
-    logging.info(f'initialized apriltag2 detector')
-
     # 创建机械臂对象
     arm = ArmWrapper()
     if not arm.is_connected():
         logging.error(f'{RED}failed to connect to arm, exiting {RESET}')
+        exit(1)
+    # end if
+
+    # 设置夹爪先闭合再打开,表明程序已经启动
+    is_ok = arm.set_gripper_dist(0.02)
+    if not is_ok:
+        logging.error('set gripper initial position failed, exiting')
+        exit(1)
+    # end if
+    time.sleep(0.5)
+    is_ok = arm.set_gripper_dist(0.07)
+    if not is_ok:
+        logging.error('set gripper initial position failed, exiting')
         exit(1)
     # end if
 
@@ -537,6 +578,8 @@ if __name__ == '__main__':
     # 运行
     run(T_end_cam,
         tmpl_dict,
+        detect_T_base_end,
+        place_T_base_end,
         cam_node,
         arm_node,
         matcher,

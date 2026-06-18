@@ -51,8 +51,8 @@ if __name__ == '__main__':
     frame_id = args.frame_id
     pc_frame_id = args.pc_frame_id
 
-    print(f'frame_id: {GREEN}{frame_id}{RESET}')
-    print(f'pc_frame_id: {GREEN}{pc_frame_id}{RESET}')
+    print(f'frame_id: {BLUE}{frame_id}{RESET}')
+    print(f'pc_frame_id: {BLUE}{pc_frame_id}{RESET}')
     print()
 
     calib_dir = os.path.normpath(os.path.join(root_dir, 'data/calib'))  # 标定文件夹路径
@@ -95,6 +95,13 @@ if __name__ == '__main__':
     keyboard_reader = KeyboardReader()
 
     print()
+    logging.info(f'use keyboard to control: \n{BLUE}'
+                 f'  q: 退出程序\n'
+                 f'  v: 打印当前机械臂状态\n'
+                 f'  a: 调整末端,使末端坐标系的 Z 轴指向基座坐标系的 -Z 轴\n'
+                 f'  c: 调整末端,使相机坐标系的 Z 轴指向下方\n'
+                 f'  <: 缩小夹爪之间的距离\n'
+                 f'  >: 放大夹爪之间的距离\n{RESET}')
 
     while rclpy.ok():
 
@@ -134,30 +141,15 @@ if __name__ == '__main__':
             joins = arm.get_joints()
             T_base_end = arm.get_pose()
             gripper_dist = arm.get_gripper_dist()
-            pose = arm._matrix_to_array(T_base_end)
-            logging.info(f'current joints: {GREEN}{joins}{RESET}')
-            logging.info(f'current pose: {GREEN}{pose}{RESET}')
+            pose = arm.matrix_to_array(T_base_end)
+            logging.info(f'current joints: {GREEN}[{", ".join(f"{j:.8f}" for j in joins)}]{RESET}')
+            logging.info(f'current pose: {GREEN}[{", ".join(f"{p:.8f}" for p in pose)}]{RESET}')
             logging.info(f'current gripper dist: {GREEN}{gripper_dist:.4f}{RESET}')
         # end if
 
         # 调整末端,使末端坐标系的 Z 轴指向基座坐标系的 -Z 轴
         if key == 'a':
             target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=-3, obj_axis_idx=3)
-            if target_T_base_end is None:
-                continue
-            # end if
-
-            logging.info(f'try move to new T_base_end:\n{target_T_base_end}')
-            is_ok = arm.set_pose(target_T_base_end)
-            if not is_ok:
-                logging.warning('failed to move to new T_base_end')
-            # end if
-            print()
-        # end if
-
-        # 调整末端,使末端坐标系的 X 轴指向基座坐标系的 Z 轴
-        if key == 'b':
-            target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=3, obj_axis_idx=1)
             if target_T_base_end is None:
                 continue
             # end if

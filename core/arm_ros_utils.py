@@ -30,7 +30,7 @@ def pose_to_msg(T: np.ndarray) -> geometry_msgs.msg.PoseStamped:
     """
     将位姿矩阵转换为 ROS PoseStamped 消息,注意这里没有设置 frame_id 以及时间戳    
     Args:
-        T (np.ndarray): 位姿矩阵，形状为 (4, 4)
+        T (np.ndarray): 位姿矩阵,形状为 (4, 4)
     Returns:
         (geometry_msgs.msg.PoseStamped): ROS PoseStamped 消息
     """

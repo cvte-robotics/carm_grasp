@@ -1,5 +1,8 @@
 """
-功能说明: 创建3D抓取模板的 ROS 节点，也可以用于发布机械臂状态
+功能说明: 创建3D抓取模板的 ROS 节点,也可以用于发布机械臂状态
+模板需要保存以下数据:
+- 1.末端刚好抓取到物体时的状态, 包含机械臂末端位姿和夹爪距离等信息
+- 2.处于抓取准备阶段时的状态, 包含机械臂末端位姿、夹爪距离、以及物体在相机坐标系中的位姿
 """
 
 import logging
@@ -11,8 +14,6 @@ import os
 import sys
 import time
 import json
-
-from typing_extensions import List, Tuple
 
 import cv2
 
@@ -29,7 +30,7 @@ from core.utils import (
 from core.arm_wrapper import ArmWrapper
 from core.arm_utils import compute_axis_aligned_pose
 from core.cam_ros_utils import CamNode
-from core.vision_utils import Matcher3D, depth_mean_filter
+from core.vision_utils import TagMatcher3D, depth_mean_filter
 
 
 ######################################################### 全局变量 #########################################################
@@ -82,12 +83,12 @@ if __name__ == '__main__':
     rgbd_params_path = os.path.join(root_dir, 'data/calib/cam_params.json')
     intrinsic, distortion, depth_scale = read_rgbd_params(rgbd_params_path)
 
-    config = Matcher3D.Config(
+    config = TagMatcher3D.Config(
         intrinsic=intrinsic,
         distortion=distortion,
         depth_scale=depth_scale
     )
-    matcher = Matcher3D(config)
+    matcher = TagMatcher3D(config)
 
     # 读取手眼标定矩阵
     print()
@@ -113,6 +114,16 @@ if __name__ == '__main__':
     # 创建文件夹用于保存结果
     tmpl_dir = os.path.normpath(tmpl_dir)  # 规范化路径
     os.makedirs(tmpl_dir, exist_ok=True)
+
+    print()
+    logging.info(f'use keyboard to control: \n{BLUE}'
+                 f'  q: 退出程序\n'
+                 f'  <: 缩小夹爪距离\n'
+                 f'  >: 放大夹爪距离\n'
+                 f'  a: 使末端的 z 轴方向与基座的 -z 轴平行\n'
+                 f'  c: 使相机的 z 轴方向与基座的 -z 轴平行\n'
+                 f'  g: 保存抓取时的状态\n'
+                 f'  r: 保存准备阶段的状态\n{RESET}')
 
     while rclpy.ok():
 
@@ -175,65 +186,6 @@ if __name__ == '__main__':
             # end if
             print()
         # end if
-
-        # 保存视觉检测时的数据
-        if key == 'd':
-
-            print()
-            logging.info(f"{GREEN}task: save detect data {RESET}")
-
-            # 获取 RGB-D 图像
-            frames = cam_node.get_frames(do_spin_once=True)
-            if frames is None:
-                logging.warning('No RGB-D frame available yet.')
-                continue
-            # end if
-
-            color_img, depth_img = frames[0]
-            logging.info(f"rgb_img shape: {color_img.shape}, depth_img shape: {depth_img.shape}")
-
-            logging.info(f"joints: {joints}")
-            logging.info(f"gripper_dist(m): {gripper_dist:.3f}")
-
-            # 保存结果
-            rgb_path = os.path.join(tmpl_dir, f'detect-color.png')
-            depth_path = os.path.join(tmpl_dir, f'detect-depth.png')
-
-            cv2.imwrite(rgb_path, color_img)
-            cv2.imwrite(depth_path, depth_img)
-            logging.info(f'Saved color images to: {rgb_path}')
-
-            # 保存机械臂状态
-            data_dict = {
-                "T_base_end": T_base_end.tolist(),
-                "joints": joints,
-                "gripper_dist": gripper_dist
-            }
-            file_path = os.path.join(tmpl_dir, f'detect.json')
-            with open(file_path, 'w') as f:
-                json.dump(data_dict, f, indent=4)
-            logging.info(f'Saved detect state to: {file_path}')
-
-        # 保存放置物体时的数据
-        if key == 'p':
-
-            print()
-            logging.info(f"{GREEN}task: save place data {RESET}")
-
-            logging.info(f"joints: {joints}")
-            logging.info(f"gripper_dist(m): {gripper_dist:.3f}")
-
-            # 保存机械臂状态
-            data_dict = {
-                "T_base_end": T_base_end.tolist(),
-                "joints": joints,
-                "gripper_dist": gripper_dist
-            }
-            file_path = os.path.join(tmpl_dir, f'place.json')
-            with open(file_path, 'w') as f:
-                json.dump(data_dict, f, indent=4)
-            logging.info(f'Saved place state to: {file_path}')
-
 
         # 保存抓取时的数据
         if key == 'g':
@@ -325,12 +277,6 @@ if __name__ == '__main__':
             with open(file_path, 'w') as f:
                 json.dump(data_dict, f, indent=4)
             logging.info(f'Saved ready state to: {file_path}')
-        # end if
-
-        if key == 'n':  # 下一个模板
-            tmpl_cnt += 1
-            print()
-            logging.info(f'Next template: {tmpl_cnt}')
         # end if
 
     # end while

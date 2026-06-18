@@ -145,7 +145,7 @@ class CamNode(Node):
             do_spin_once (bool): 是否在函数内部执行 rclpy.spin_once. 如果调用该函数前已经在外部执行了 rclpy.spin 或者 rclpy.spin_once, 
                                  则可以将该参数设置为 False 以避免重复调用
         Returns:
-            (List[List[np.ndarray]]): 帧列表
+            (List[List[np.ndarray]]): 帧列表,如果失败则返回 None. 每一帧是一个包含多张图像的列表, 图像的顺序与 img_topic_list 中话题的顺序一致
         """
 
         self.enable_receive_frame = True

@@ -70,6 +70,50 @@ def reset_empty_str(param):
 # end def reset_empty_str
 
 
+def read_cam_params(json_file_path: str) -> Tuple[List[float], List[float]]:
+    """
+    读取相机参数     
+    Args:
+        json_file_path (str): 相机参数文件路径
+    Returns:
+        (Tuple[List[float], List[float]]): 包括以下项    
+            - 相机内参矩阵 [fx, fy, cx, cy]    
+            - 畸变系数( 可以为空 ) [k1, k2, p1, p2, [k3, [k4 ,k5 ,k6]]]    
+    """
+
+    logging.info(f"Try to read camera parameters from: {GREEN}{json_file_path}{RESET}")
+    try:
+        with open(json_file_path, 'r') as f:
+            param = json.load(f)
+        # end with
+    except Exception as e:
+        logging.error(f"Failed to read camera parameters from {json_file_path}: {e}")
+        return None, None
+    # end try
+
+    # 如果有 serial_number, 打印出来
+    if 'serial_number' in param:
+        logging.info(f"camera serial number: {GREEN}{param['serial_number']}{RESET}")
+    # end if
+
+    if 'intrinsic' not in param:
+        logging.error("JSON file must contain 'intrinsic' field.")
+        return None, None
+    # end if
+
+    intrinsic = param['intrinsic']
+    if 'distortion' in param:
+        distortion = param['distortion']
+    else:
+        distortion = None
+    # end if
+    logging.info(f"intrinsic: {GREEN}{intrinsic}{RESET}")
+    logging.info(f"distortion: {GREEN}{distortion}{RESET}")
+
+    return intrinsic, distortion
+# end def read_cam_params
+
+
 def read_rgbd_params(json_file_path: str) -> Tuple[List[float], List[float], float]:
     """
     读取 RGB-D 相机参数     
@@ -225,7 +269,7 @@ def compute_aligned_pose(T_a_b0: np.ndarray,
         T_b_c( np.ndarray ): 从 c 坐标系到 b 坐标系的固定变换矩阵, 4*4
         T_c0_d( np.ndarray ): 0 时刻从 d 坐标系到 c 坐标系的变换矩阵, 4*4
         T_c1_d( np.ndarray ): 1 时刻从 d 坐标系到 c 坐标系的变换矩阵, 4*4   
-        
+
     Returns: 
         T_a_b1( np.ndarray ): 1 时刻从 b 坐标系到 a 坐标系的变换矩阵, 4*4   
     """

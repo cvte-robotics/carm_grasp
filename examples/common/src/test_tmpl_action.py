@@ -15,6 +15,8 @@ from typing_extensions import List, Tuple, Dict
 
 # 导入本工程的模块
 
+from create_tmpl_action import load_action  # 同目录下的模块
+
 code_dir = os.path.dirname(os.path.realpath(__file__))
 root_dir = os.path.normpath(f'{code_dir}/../../../')
 sys.path.append(root_dir)
@@ -24,9 +26,6 @@ from core.utils import (
     wait_key
 )
 from core.arm_wrapper import ArmWrapper
-from core.arm_utils import compute_pose_arm_z
-
-from examples.common.src.create_tmpl_action import load_action  # 同目录下的模块
 
 
 ######################################################### 全局变量 #########################################################
@@ -41,7 +40,7 @@ def read_tmpl_action(tmpl_dir: str) -> List[Dict]:
         tmpl_dir (str): 模板文件夹路径
 
     Returns:
-        List[Dict]: 包含所有行动模板的列表，每个模板为一个字典，包含机械臂末端位姿、关节角和夹爪距离
+        List[Dict]: 包含所有行动模板的列表,每个模板为一个字典,包含机械臂末端位姿、关节角和夹爪距离
     """
     action_tmpl_list = []
     tmpl_idx = 0
@@ -71,13 +70,13 @@ def do_action(action_tmpl_list: List[Dict],
     """
     执行行动模板列表中的每一个模板, 包含机械臂末端位姿, 关节角, 夹爪距离
     Args:
-        action_tmpl_list (List[Dict]): 包含所有行动模板的列表，每个模板为一个字典，包含机械臂末端位姿、关节角和夹爪距离
+        action_tmpl_list (List[Dict]): 包含所有行动模板的列表,每个模板为一个字典,包含机械臂末端位姿、关节角和夹爪距离
         arm (ArmWrapper): 机械臂对象
         debug (bool): 是否开启调试模式, 如果开启, 则在执行每一个模板前会等待用户输入
     """
-    is_ok = arm.set_control_mode(ArmWrapper.ControlMode.POSITION)
+    is_ok = arm.set_control_mode(ArmWrapper.ControlMode.PF)
     if not is_ok:
-        logging.error(f'{RED}failed to switch to [position control] mode{RESET}')
+        logging.error(f'{RED}failed to switch to [position force] mode{RESET}')
         return False
     # end if
 
@@ -117,7 +116,7 @@ def run(action_tmpl_list: List[Dict],
     """
     执行行动模板列表中的每一个模板, 包含机械臂末端位姿, 关节角, 夹爪距离
     Args:
-        action_tmpl_list (List[Dict]): 包含所有行动模板的列表，每个模板为一个字典，包含机械臂末端位姿、关节角和夹爪距离
+        action_tmpl_list (List[Dict]): 包含所有行动模板的列表,每个模板为一个字典,包含机械臂末端位姿、关节角和夹爪距离
         arm (ArmWrapper): 机械臂对象
         debug (bool): 是否开启调试模式, 如果开启, 则在执行每一个模板前会等待用户输入
     """
@@ -147,6 +146,9 @@ if __name__ == '__main__':
 
     parser.add_argument("--tmpl_dir", type=str,
                         help="保存模板文件的目录")
+    
+    parser.add_argument("--debug", action='store_true',
+                        help="是否开启调试模式")
 
     args = parser.parse_args()
 
@@ -157,8 +159,11 @@ if __name__ == '__main__':
         exit(1)
     # end if
 
+    debug = args.debug
+
     print()
-    print(f'action template will be read from: {GREEN}{tmpl_dir}{RESET}')
+    print(f'action template will be read from: {BLUE}{tmpl_dir}{RESET}')
+    print(f'enable debug mode: {BLUE}{debug}{RESET}')
     print()
 
     # 读取模板文件
@@ -176,5 +181,5 @@ if __name__ == '__main__':
     # end if
 
     # 执行任务
-    run(action_tmpl_list, arm, debug=False)
+    run(action_tmpl_list, arm, debug=debug)
 # end if __name__ == '__main__'

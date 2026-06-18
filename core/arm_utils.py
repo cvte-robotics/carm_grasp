@@ -13,14 +13,13 @@ import numpy as np
 import cv2
 import open3d
 
-# 3D匹配库
-from matching3d import rgbd_to_point_cloud, depth_to_point_cloud
-
 # 导入本工程的模块
 from .utils import (
     GREEN, YELLOW, RESET,
     inv_tf
 )
+from .vision_utils import rgbd_to_point_cloud, depth_to_point_cloud
+
 
 ######################################################### 全局变量 #########################################################
 
@@ -60,24 +59,24 @@ class GripperBody:
     # end def __init__
 
     def initialize(self,
-                   corners_3d: np.ndarray):
+                   corners3d: np.ndarray):
         """
         初始化: 计算从夹爪坐标系到相机坐标系的位姿变换
         Args:
-            corners_3d (np.ndarray): 夹爪平面的 AprilTag 标签的四个角点的3D坐标,形状为 (4, 3)
+            corners3d (np.ndarray): 夹爪平面的 AprilTag 标签的四个角点的3D坐标,形状为 (4, 3)
         """
 
-        assert corners_3d.shape == (4, 3), "corners_3d must have shape (4, 3)"
+        assert corners3d.shape == (4, 3), "corners3d must have shape (4, 3)"
 
-        # 坐标系定义, 从 corners_3d[0] 指向 corners_3d[2] 的方向为 X 轴, 从 corner[3] 指向 corner[1] 的方向为 Y 轴
+        # 坐标系定义, 从 corners3d[0] 指向 corners3d[2] 的方向为 X 轴, 从 corner[3] 指向 corner[1] 的方向为 Y 轴
         # Z 轴为平面的法向量,由右手定则确定
-        # 原点为 corners_3d[0] 和 corners_3d[2] 的中点
+        # 原点为 corners3d[0] 和 corners3d[2] 的中点
 
-        center_3d = corners_3d.mean(axis=0)  # 更鲁棒的中心
-        edge_x = corners_3d[2] - corners_3d[0]
-        edge_y = corners_3d[1] - corners_3d[3]
+        center_3d = corners3d.mean(axis=0)  # 更鲁棒的中心
+        edge_x = corners3d[2] - corners3d[0]
+        edge_y = corners3d[1] - corners3d[3]
         if np.linalg.norm(edge_x) < 1e-9 or np.linalg.norm(edge_y) < 1e-9:
-            raise ValueError("角点退化，无法建立坐标系")
+            raise ValueError("角点退化,无法建立坐标系")
         # end if
 
         axis_x = edge_x / np.linalg.norm(edge_x)
@@ -138,7 +137,8 @@ class GripperBody:
 
 class CollisionDetector:
     """
-    碰撞检测器( 仅适用于眼在手的场景 )
+    碰撞检测器( 仅适用于眼在手的场景 )      
+    通过将夹爪在目标位置下的空间矩形投影到参考位置下的深度图像上,计算投影深度图与真实深度图的差异来判断是否发生碰撞
     """
 
     def __init__(self,
@@ -351,7 +351,7 @@ class CollisionDetector:
 
         st = time.time()
 
-        # 从 target 位置到 ref 位置，相机位姿的变换
+        # 从 target 位置到 ref 位置,相机位姿的变换
         cam_T_ref_target = inv_tf(ref_T_base_end @ self.T_end_cam) @ (target_T_base_end @ self.T_end_cam)
 
         # 计算 target 位置下的夹爪在 ref 位置下的相机坐标系的空间矩形的顶点 8*3
@@ -371,7 +371,7 @@ class CollisionDetector:
         right_valid_cnt, right_bad_cnt = self._compute_depth_diff(ref_depth_img, proj_depth_img, proj_mask_img, right_contour,
                                                                   mask_value=255, max_depth_diff=max_depth_diff)
 
-        logging.info(f'check_collision cost time( ms ): {(time.time() - st) * 1000:.1f} ms')
+        logging.info(f'check_collision cost time( ms ): {(time.time() - st) * 1000:.1f}')
         logging.info(f'check_collision (bad_cnt/valid_cnt), left: {left_bad_cnt}/{left_valid_cnt}, right: {right_bad_cnt}/{right_valid_cnt}')
 
         if debug_level >= 1:
