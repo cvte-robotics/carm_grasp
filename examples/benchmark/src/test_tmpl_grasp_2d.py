@@ -1,5 +1,40 @@
 """
 功能: 测试基于 AprilTag2 的 2D 抓取模板数据的使用
+适用条件:
+    1. 物体表面贴有 AprilTag, 放置在平面上, 且平面与机械臂基座的XOY平面平行, 物体在平面上的自由度为 3 (x,y,theta), 其中 theta 为物体在平面上的朝向角
+    2. 机械臂末端安装有相机, 且相机的 z 轴与末端的 z 轴夹角为小于 45 度
+    3. 机械臂执行抓取任务时, 保持末端的 z 轴与平面法向方向平行, 且末端的 z 轴始终指向平面
+实现思路:
+    1. 多线程架构:
+       - 主线程: 运行 rclpy.spin_once 循环( 配合 stop_event ), 持续处理相机订阅回调,
+         确保 frame_callback 实时触发, 始终缓存最新图像帧到 cam_node.imgs 中.
+       - 子线程: 执行 run() 抓取主循环, 调用 do_grasp() 完成 4 步 2D 视觉伺服抓取流程.
+    2. 帧获取机制:
+       - CamNode 仅订阅单个 RGB 话题, ApproximateTimeSynchronizer 单输入直通.
+       - get_frames(do_spin_once=False) 在主线程 spin 的前提下, 仅轮询 self.stamp 等待新帧,
+         不再自行调用 spin_once, 避免与主线程 spin 冲突.
+    3. 模板数据结构( read_tmpl_grasp_2d ):
+       - grasp: 最终抓取位姿与夹爪开度.
+       - near / next_near: 近距离下两个相邻时刻的末端位姿和物体 2D 位姿, 用于计算近距离 Jacobian 比值.
+       - far / next_far: 远距离下两个相邻时刻的末端位姿和物体 2D 位姿, 用于计算远距离 Jacobian 比值.
+    4. 视觉伺服控制( compute_delta_end_pose ):
+       - 引入"虚拟相机"概念: 与真实相机同原点, 但坐标轴与末端对齐, 内参为单位矩阵( 归一化坐标 ).
+       - 将 near/far 模板和当前观测的 2D 位姿统一变换到虚拟相机归一化坐标系.
+       - 根据当前 Z 高度在 near_z 和 far_z 之间线性插值, 计算目标 Jacobian 比值(target_ratio)和目标归一化坐标(target_uv).
+       - 旋转校正: 计算当前观测与 near 模板的角度差 delta_theta, 构建绕 Z 轴的旋转矩阵.
+       - 平移校正: 当前归一化坐标与目标归一化坐标的偏差 x target_ratio → 末端平移增量.
+       - Z 轴步进限制: 每次最多移动 z_step=0.05m, 避免过冲.
+    5. 抓取流程( do_grasp ):
+       Step 1: 检测 AprilTag → 获取物体 2D 位姿 [nx, ny, theta].
+       Step 2: 计算末端位姿增量( compute_delta_end_pose ) → 移动机械臂.
+       Step 3: 重复 Step 1-2, 直到增量足够小( 平移<1mm 且旋转<2° )或达到最大尝试次数(20次).
+       Step 4: 末端相对于 near 位姿执行 final_T_end 增量到达抓取位姿 → 闭合夹爪 → 抬高.
+    6. 放置流程:
+       - 直接移动到放置位姿 → 打开夹爪释放物体.
+    7. 退出清理:
+       - Ctrl+C 或子线程正常结束 → 主线程退出 spin 循环 → finally 块依次执行:
+         机械臂回零位 → 等待子线程 → 恢复速度并断连 → 销毁节点 → 关闭 rclpy.
+
 """
 
 import argparse
@@ -8,7 +43,7 @@ import sys
 import logging
 import time
 import json
-
+import threading
 from typing_extensions import List, Tuple, Dict
 
 import numpy as np
@@ -24,7 +59,7 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
-    wait_key, inv_tf, read_cam_params, read_handeye_calib
+    wait_key, inv_tf, read_cam_params, read_calib_handeye
 )
 from core.arm_wrapper import ArmWrapper
 from core.arm_utils import compute_axis_aligned_pose
@@ -274,6 +309,9 @@ def do_grasp(T_end_cam: np.ndarray,
     near_T_base_end = tmpl_dict['near_T_base_end']
     final_T_end = inv_tf(near_T_base_end) @ grasp_T_base_end
 
+    th_delta_dist = 0.001  # 当末端位姿增量的平移小于该阈值时, 认为末端位姿已经足够接近目标位姿, 无需再移动
+    th_delta_angle = 2.0 / 180.0 * np.pi  # 当末端位姿增量的旋转小于该阈值时, 认为末端位姿已经足够接近目标位姿, 无需再移动
+
     max_try_cnt = 20
     try_cnt = 0
     while rclpy.ok():
@@ -285,7 +323,7 @@ def do_grasp(T_end_cam: np.ndarray,
         # end if
 
         # 获取图像
-        frame_list = cam_node.get_frames(do_spin_once=True)
+        frame_list = cam_node.get_frames()
         if frame_list is None:
             logging.error(f'{RED}failed to get images, skip this grasp try{RESET}')
             return False
@@ -314,7 +352,7 @@ def do_grasp(T_end_cam: np.ndarray,
         delta_dist = np.linalg.norm(delta_T_end[0:3, 3])
         delta_angle = np.arccos((np.trace(delta_T_end[0:3, 0:3]) - 1) / 2)
         logging.info(f'delta_dist(m): {delta_dist:.4f}, delta_angle(deg): {delta_angle * 180.0 / np.pi:.4f}')
-        if delta_dist < 0.0005 and delta_angle < 1.0 / 180.0 * np.pi:
+        if delta_dist < th_delta_dist and delta_angle < th_delta_angle:
             logging.info(f'delta_T_end is small enough, no need to move, break detecting loop')
             break
         # end if
@@ -404,9 +442,12 @@ def run(T_end_cam: np.ndarray,
         arm_node: TargetArmNode,
         matcher: TagMatcher2D,
         arm: ArmWrapper,
-        debug: bool = False):
+        debug: bool = False,
+        stop_event: threading.Event = None):
     """
     执行平面上物体抓取任务
+    Args:
+        stop_event (threading.Event): 停止事件, 正常结束时设置此事件以通知主线程退出 spin 循环
     """
 
     max_gripper_dist = 0.08
@@ -474,6 +515,16 @@ def run(T_end_cam: np.ndarray,
 
         time.sleep(0.5)
     # end while
+
+    # 机械臂回到零点
+    arm.set_joints(arm.init_joints)
+
+    # 通知主线程停止 spin 循环
+    if stop_event is not None:
+        stop_event.set()
+
+    logging.info('run finished.')
+    
 # end def run
 
 
@@ -486,7 +537,7 @@ if __name__ == '__main__':
     parser.add_argument("--cam_params_path", type=str, required=True,
                         help="相机参数文件的路径, 包含内参和畸变参数")
 
-    parser.add_argument("--handeye_calib_path", type=str, required=True,
+    parser.add_argument("--calib_handeye_path", type=str, required=True,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
 
     parser.add_argument("--color_img_topic", type=str, required=True,
@@ -496,10 +547,10 @@ if __name__ == '__main__':
                         help="模板文件的目录")
 
     parser.add_argument("--detect_pose", type=str, required=True,
-                        help="检测状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+                        help="检测状态下的末端位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
 
     parser.add_argument("--place_pose", type=str, required=True,
-                        help="放置状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+                        help="放置状态下的末端位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
 
     parser.add_argument("--debug", action='store_true',
                         help="是否开启调试模式")
@@ -507,7 +558,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cam_params_path = args.cam_params_path
-    handeye_calib_path = args.handeye_calib_path
+    calib_handeye_path = args.calib_handeye_path
 
     color_img_topic = args.color_img_topic
     if color_img_topic is None:
@@ -531,7 +582,7 @@ if __name__ == '__main__':
 
     print()
     print(f"camera parameters file: {BLUE}{cam_params_path}{RESET}")
-    print(f"handeye calib file: {BLUE}{handeye_calib_path}{RESET}")
+    print(f"handeye calib file: {BLUE}{calib_handeye_path}{RESET}")
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
     print(f'grasp_2d template dir: {BLUE}{tmpl_dir}{RESET}')
     print(f'detect pose: {BLUE}{detect_pose}{RESET}')
@@ -546,11 +597,12 @@ if __name__ == '__main__':
     config = TagMatcher2D.Config(
         intrinsic=intrinsic,
         distortion=distortion,
+        debug_dir=os.path.join(root_dir, 'results', 'debug', 'grasp_2d')
     )
     matcher = TagMatcher2D(config)
 
     # 读取手眼标定结果
-    T_end_cam, _ = read_handeye_calib(handeye_calib_path)
+    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
     if T_end_cam is None:
         exit(1)
     # end if
@@ -588,15 +640,68 @@ if __name__ == '__main__':
     cam_node = CamNode([color_img_topic])
     arm_node = TargetArmNode()
 
+    # 线程停止事件: 子线程正常结束时设置此事件, 通知主线程退出 spin 循环
+    stop_event = threading.Event()
+
     # 运行
-    run(T_end_cam,
-        tmpl_dict,
-        detect_T_base_end,
-        place_T_base_end,
-        cam_node,
-        arm_node,
-        matcher,
-        arm,
-        debug=debug)
+    thd_run = threading.Thread(target=run,
+                               args=(T_end_cam,
+                                     tmpl_dict,
+                                     detect_T_base_end,
+                                     place_T_base_end,
+                                     cam_node,
+                                     arm_node,
+                                     matcher,
+                                     arm,
+                                     debug,
+                                     stop_event)  # 传入停止事件
+                               )
+    thd_run.start()
+
+    try:
+        # 使用 spin_once 循环代替 rclpy.spin, 以便周期性检查子线程是否结束
+        while rclpy.ok() and not stop_event.is_set():
+            rclpy.spin_once(cam_node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        logging.warning('interrupted by user (Ctrl+C)')
+    finally:
+        logging.info('shutting down...')
+
+        # 1. 机械臂回到初始位置
+        try:
+            arm.set_joints(arm.init_joints)
+        except Exception as e:
+            logging.warning(f'arm set_joints to init failed: {e}')
+
+        # 2. 等待抓取子线程结束
+        thd_run.join(timeout=10.0)
+        if thd_run.is_alive():
+            logging.warning('run thread still alive after timeout, force proceeding.')
+
+        # 3. 恢复机械臂速度等级并断开连接( 从 __del__ 提前到显式调用, 确保确定性清理 )
+        try:
+            arm.set_speed_level(arm.init_speed_level)
+        except Exception:
+            pass
+        try:
+            arm.arm.disconnect()
+            logging.info('Arm disconnected.')
+        except Exception:
+            pass
+
+        # 4. 销毁 ROS2 节点
+        cam_node.destroy_node()
+        arm_node.destroy_node()
+
+        # 5. 关闭 rclpy( 加保护避免 SIGINT handler 已抢先 shutdown 导致重复调用报错 )
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+
+        logging.info('shutdown complete.')
+
+    # end try
 
 # end if __name__ == '__main__':

@@ -1,6 +1,31 @@
 # -*- coding: utf-8 -*-
 """
 功能说明: 基于自研机械臂 CARM 的 3D 抓取( 6 个自由度 )示例 ROS2 节点    
+适用条件:
+    1. 物体表面贴有 AprilTag
+    2. 相机安装在机械臂末端, 且相机的 z 轴与末端的 z 轴夹角小于 45 度
+实现思路:
+    1. 多线程架构:
+       - 主线程: 运行 rclpy.spin(cam_node), 持续处理相机订阅回调, 确保 frame_callback 实时触发,
+         始终缓存最新同步帧( RGB + Depth )到 cam_node.imgs 中.
+       - 子线程: 执行 run() 抓取主循环, 调用 do_grasp() 完成 6 步抓取流程.
+    2. 帧获取机制:
+       - cam_node.frame_callback 由 ApproximateTimeSynchronizer 驱动, 仅在 enable_receive_frame=True
+         时将同步帧写入 self.imgs 并置位 self.stamp.
+       - get_frames(do_spin_once=False) 在主线程 spin 的前提下, 仅轮询 self.stamp 等待新帧,
+         不再自行调用 spin_once, 避免与主线程 spin 冲突.
+    3. 抓取流程( do_grasp ):
+       Step 1: 匹配物体( match ), 获取初始 T_cam_model.
+       Step 2: 计算预备位姿( compute_ready_pose ), 使物体在相机中的位姿与模板一致.
+       Step 3: 移动到预备位姿.
+       Step 4-5: 迭代细化( 最多 max_refine_cnt 次 ), 每次 track 物体后重新计算预备位姿并移动.
+       Step 6: 计算抓取位姿( 预备位姿 @ delta_T_end ), 直线移动到抓取位姿, 闭合夹爪.
+    4. 放置流程:
+       - 先保持当前 Z 高度直线移动到放置位 XY, 再下降到放置位 Z, 打开夹爪释放物体.
+    5. 退出清理:
+       - Ctrl+C → KeyboardInterrupt → finally 块依次执行:
+         机械臂回零位 → 等待子线程结束 → 销毁 ROS2 节点 → 关闭 rclpy.
+
 """
 
 import rclpy
@@ -12,6 +37,7 @@ import sys
 import time
 import json
 import mmengine
+import threading
 from typing_extensions import List, Tuple, Dict
 
 import numpy as np
@@ -26,7 +52,7 @@ sys.path.append(root_dir)
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
     wait_key, reset_empty_str,
-    read_rgbd_params, read_handeye_calib, inv_tf
+    read_rgbd_params, read_calib_handeye, inv_tf
 )
 
 from core.arm_wrapper import ArmWrapper
@@ -146,7 +172,7 @@ def match(cam_node: CamNode,
         (np.ndarray): 匹配得到的从物体到相机的变换矩阵
     """
 
-    frames = cam_node.get_frames(do_spin_once=True)
+    frames = cam_node.get_frames()
     if frames is None:
         logging.error(f"{RED}get frames failed.{RESET}")
         return None
@@ -185,7 +211,7 @@ def track(cam_node: CamNode,
         (np.ndarray): 跟踪得到的从物体到相机的变换矩阵
     """
 
-    frames = cam_node.get_frames(do_spin_once=True)
+    frames = cam_node.get_frames()
     if frames is None:
         logging.error(f"{RED}get frames failed.{RESET}")
         return None
@@ -434,7 +460,7 @@ def do_grasp(T_end_cam: np.ndarray,
     target_T_base_end = cur_T_base_end @ delta_T_end
     logging.info(f'grasp T_base_end: \n{GREEN}{target_T_base_end}{RESET}')
 
-    target_gripper_dist = grasp_gripper_dist + 0.01  # 刚好比物体宽一点,不会碰到其他物体
+    target_gripper_dist = grasp_gripper_dist + 0.015  # 刚好比物体宽一点,不会碰到其他物体
 
     # 设置夹爪位置
     is_ok = arm.set_gripper_dist(target_gripper_dist)
@@ -504,9 +530,12 @@ def run(T_end_cam: np.ndarray,
         arm_node: TargetArmNode,
         matcher: TagMatcher3D,
         debug_level: int,
-        debug: bool = False):
+        debug: bool = False,
+        stop_event: threading.Event = None):
     """
-    循环执行 3D 抓取任务    
+    循环执行 3D 抓取任务
+    Args:
+        stop_event (threading.Event): 停止事件, 正常结束时设置此事件以通知主线程退出 spin 循环
     """
 
     max_gripper_dist = 0.08
@@ -518,7 +547,7 @@ def run(T_end_cam: np.ndarray,
         ######## 0. 移动到检测位置 ########
         logging.info(f'step [0] , {BLUE}move to detect pose{RESET}')
         if not wait_key(debug):
-            return -1
+            break
         # end if
 
         logging.info(f"{GREEN}try move arm to detect pose...{RESET}")
@@ -552,14 +581,14 @@ def run(T_end_cam: np.ndarray,
 
         if not is_ok:
             logging.error(f"{RED}grasp failed at current loop.{RESET}")
-            return -1
+            break
         # end if
 
         ######## -1. 放置 ########
         print()
         logging.info(f'step [-1] , {BLUE}move to place pose{RESET}')
         if not wait_key(debug):
-            return -1
+            break
         # end if
 
         # 移动到放置位置
@@ -591,6 +620,10 @@ def run(T_end_cam: np.ndarray,
     # 机械臂回到零点
     arm.set_joints(arm.init_joints)
 
+    # 通知主线程停止 spin 循环
+    if stop_event is not None:
+        stop_event.set()
+
     logging.info('run finished.')
 
 # end def run
@@ -606,9 +639,9 @@ if __name__ == '__main__':
     parser.add_argument("--cam_params_path", type=str, required=True,
                         help="相机参数文件的路径, 包含内参和畸变参数")
 
-    parser.add_argument("--handeye_calib_path", type=str, required=True,
+    parser.add_argument("--calib_handeye_path", type=str, required=True,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
-    
+
     parser.add_argument("--gripper_path", type=str, required=True,
                         help="夹爪标定文件的路径, 包含夹爪的尺寸和位姿信息")
 
@@ -622,10 +655,10 @@ if __name__ == '__main__':
                         help="模板文件的目录")
 
     parser.add_argument("--detect_pose", type=str, required=True,
-                        help="检测状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+                        help="检测状态下的末端位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
 
     parser.add_argument("--place_pose", type=str, required=True,
-                        help="放置状态下的位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
+                        help="放置状态下的末端位姿, 格式[tx,ty,tz,qx,qy,qz,qw], 其中 t 是位移, q 是旋转四元数")
 
     parser.add_argument("--debug", action='store_true',
                         help="是否开启调试模式")
@@ -633,7 +666,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cam_params_path = args.cam_params_path
-    handeye_calib_path = args.handeye_calib_path
+    calib_handeye_path = args.calib_handeye_path
     gripper_path = args.gripper_path
 
     color_img_topic = args.color_img_topic
@@ -668,7 +701,7 @@ if __name__ == '__main__':
 
     print()
     print(f"RGB-D camera parameters file: {BLUE}{cam_params_path}{RESET}")
-    print(f"handeye calib file: {BLUE}{handeye_calib_path}{RESET}")
+    print(f"handeye calib file: {BLUE}{calib_handeye_path}{RESET}")
     print(f"gripper calib file: {BLUE}{gripper_path}{RESET}")
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
     print(f"depth image topic: {BLUE}{depth_img_topic}{RESET}")
@@ -687,7 +720,7 @@ if __name__ == '__main__':
 
     # 读取手眼标定矩阵
     print()
-    T_end_cam, _ = read_handeye_calib(handeye_calib_path)
+    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
     if T_end_cam is None:
         exit(1)
     # end if
@@ -717,20 +750,20 @@ if __name__ == '__main__':
     arm = ArmWrapper()
     if not arm.is_connected():
         logging.error(f'{RED}failed to connect to arm, exiting{RESET}')   # 红色打印
-        exit(1)
+        sys.exit(-1)
     # end if
 
     # 设置夹爪先闭合再打开,表明程序已经启动
     is_ok = arm.set_gripper_dist(0.02)
     if not is_ok:
         logging.error('set gripper initial position failed, exiting')
-        exit(1)
+        sys.exit(-1)
     # end if
     time.sleep(0.5)
     is_ok = arm.set_gripper_dist(0.07)
     if not is_ok:
         logging.error('set gripper initial position failed, exiting')
-        exit(1)
+        sys.exit(-1)
     # end if
 
     # 初始化匹配器
@@ -738,6 +771,7 @@ if __name__ == '__main__':
         intrinsic=intrinsic,
         depth_scale=depth_scale,
         distortion=distortion,
+        debug_dir=os.path.join(root_dir, 'results', 'debug', 'grasp_3d')
     )
     matcher = TagMatcher3D(config)
 
@@ -747,22 +781,72 @@ if __name__ == '__main__':
     cam_node = CamNode(img_topic_list=[color_img_topic, depth_img_topic])
     arm_node = TargetArmNode()
 
-    # 运行
-    run(T_end_cam=T_end_cam,
-        gripper_body=gripper_body,
-        tmpl_dict=tmpl_dict,
-        detect_T_base_end=detect_T_base_end,
-        place_T_base_end=place_T_base_end,
-        arm=arm,
-        cam_node=cam_node,
-        arm_node=arm_node,
-        matcher=matcher,
-        debug_level=debug_level,
-        debug=debug)
+    # 线程停止事件: 子线程正常结束时设置此事件, 通知主线程退出 spin 循环
+    stop_event = threading.Event()
 
-    cam_node.destroy_node()
-    arm_node.destroy_node()
-    rclpy.shutdown()
-    logging.info('shutdown')
+    # 运行
+    thd_run = threading.Thread(target=run,
+                               args=(T_end_cam,
+                                     gripper_body,
+                                     tmpl_dict,
+                                     detect_T_base_end,
+                                     place_T_base_end,
+                                     arm,
+                                     cam_node,
+                                     arm_node,
+                                     matcher,
+                                     debug_level,
+                                     debug,
+                                     stop_event)  # 传入停止事件
+                               )
+    thd_run.start()
+
+    try:
+        # 使用 spin_once 循环代替 rclpy.spin, 以便周期性检查子线程是否结束
+        while rclpy.ok() and not stop_event.is_set():
+            rclpy.spin_once(cam_node, timeout_sec=0.1)
+        # end while
+
+    except KeyboardInterrupt:
+        logging.warning('interrupted by user (Ctrl+C)')
+    finally:
+        logging.info('shutting down...')
+
+        # 1. 机械臂回到初始位置
+        try:
+            arm.set_joints(arm.init_joints)
+        except Exception as e:
+            logging.warning(f'arm set_joints to init failed: {e}')
+
+        # 2. 等待抓取子线程结束
+        thd_run.join(timeout=10.0)
+        if thd_run.is_alive():
+            logging.warning('run thread still alive after timeout, force proceeding.')
+
+        # 3. 恢复机械臂速度等级并断开连接( 从 __del__ 提前到显式调用, 确保确定性清理 )
+        try:
+            arm.set_speed_level(arm.init_speed_level)
+        except Exception:
+            pass
+        try:
+            arm.arm.disconnect()
+            logging.info('Arm disconnected.')
+        except Exception:
+            pass
+
+        # 4. 销毁 ROS2 节点
+        cam_node.destroy_node()
+        arm_node.destroy_node()
+
+        # 5. 关闭 rclpy( 加保护避免 SIGINT handler 已抢先 shutdown 导致重复调用报错 )
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+
+        logging.info('shutdown complete.')
+
+    # end try
 
 # end if __name__ == '__main__'

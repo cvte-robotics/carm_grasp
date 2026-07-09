@@ -169,6 +169,8 @@ if __name__ == '__main__':
     print(f'use keyboard to control: \n{BLUE}'
           f'  q: 退出程序\n'
           f'  a: 使末端的 z 轴方向与基座的 -z 轴平行\n'
+          f'  <: 缩小夹爪之间的距离\n'
+          f'  >: 放大夹爪之间的距离\n'
           f'  g: 保存抓取时的状态\n'
           f'  n: 保存相机距离物体较近时的状态\n'
           f'  b: 保存下一个相机距离物体较近时的状态\n'
@@ -186,6 +188,11 @@ if __name__ == '__main__':
         # logging.info(f'pressed: {key}')
         print()
 
+        if key == 'q':  # 退出
+            logging.info('exiting...')
+            break
+        # end if
+
         if key == 'a':   # 调整末端的 z 轴方向, 使它与基座的 z 轴平行
             logging.info(f'{BLUE}调整末端的 z 轴方向 ...{RESET}')
 
@@ -201,6 +208,19 @@ if __name__ == '__main__':
                 logging.warning('failed to move to new T_base_end')
             # end if
             print()
+        # end if
+
+        # 夹爪控制
+        gripper_step = 0.001  # 夹爪每次移动的步长
+        gripper_dist = arm.get_gripper_dist()
+        if key == ',':  # 缩小夹爪
+            set_dist = gripper_dist - gripper_step
+            arm.set_gripper_dist(set_dist)
+            logging.info(f'set gripper {gripper_dist:.3f} -->> {set_dist:.3f}, actual: {arm.get_gripper_dist():.3f}')
+        elif key == '.':  # 放大夹爪
+            set_dist = gripper_dist + gripper_step
+            arm.set_gripper_dist(set_dist)
+            logging.info(f'set gripper {gripper_dist:.3f} -->> {set_dist:.3f}, actual: {arm.get_gripper_dist():.3f}')
         # end if
 
         if key == 'g':  # 保存抓取时的状态

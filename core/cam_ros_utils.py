@@ -34,20 +34,32 @@ class CamNode(Node):
 
     def __init__(self,
                  img_topic_list: List[str],
-                 cam_info_topic_list: List[str] = None):
+                 cam_info_topic_list: List[str] = None,
+                 reliability: int = 1):
         """
         初始化   
         Args:
             img_topic_list (List[str]): 图像话题列表
             cam_info_topic_list (List[str], optional): 相机信息话题列表. 默认值为 None
+            reliability (int, optional): 消息可靠性. 0: SYSTEM_DEFAULT, 1: RELIABLE, 2: BEST_EFFORT. 默认值为 1
         """
 
         super().__init__('cam_node')  # 初始化节点名称
 
         assert len(img_topic_list) > 0, "img_topic_list must contain at least one topic."
 
+        if reliability == 0:
+            reliability_policy = ReliabilityPolicy.SYSTEM_DEFAULT
+        elif reliability == 1:
+            reliability_policy = ReliabilityPolicy.RELIABLE
+        elif reliability == 2:
+            reliability_policy = ReliabilityPolicy.BEST_EFFORT
+        else:
+            raise ValueError("Invalid reliability value. Must be 0 (SYSTEM_DEFAULT), 1 (RELIABLE), or 2 (BEST_EFFORT).")
+        # end if
+
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,  # RELIABLE / BEST_EFFORT
+            reliability=reliability_policy,  # RELIABLE / BEST_EFFORT
             history=HistoryPolicy.KEEP_LAST,            # 保留最后几条消息
             depth=1                                     # 队列深度
         )

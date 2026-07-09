@@ -32,12 +32,13 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, RESET, RED, BLUE,
-    KeyboardReader, read_handeye_calib, read_rgbd_params
+    KeyboardReader, read_calib_handeye, read_rgbd_params
 )
 from core.arm_wrapper import ArmWrapper
 from core.arm_utils import GripperBody, compute_axis_aligned_pose
 from core.arm_ros_utils import ArmNode, pose_to_transform_stamped
 from core.cam_ros_utils import CamNode
+from core.vision_utils import depth_mean_filter
 
 
 ######################################################### 全局变量 #########################################################
@@ -100,7 +101,7 @@ def compute_corners3d(gray_img: np.ndarray,
 
     # 只在 x64 架构下可视化
     import platform
-    if platform.machine() != 'x86_64':
+    if platform.machine() == 'x86_64':
         cv2.imshow('tag detection', vis_img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -167,7 +168,7 @@ if __name__ == '__main__':
     parser.add_argument("--cam_params_path", type=str, required=True,
                         help="相机参数文件的路径, 包含内参和畸变参数")
 
-    parser.add_argument("--handeye_calib_path", type=str, required=True,
+    parser.add_argument("--calib_handeye_path", type=str, required=True,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
 
     parser.add_argument("--gripper_path", type=str, required=True,
@@ -188,7 +189,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cam_params_path = args.cam_params_path
-    handeye_calib_path = args.handeye_calib_path
+    calib_handeye_path = args.calib_handeye_path
     gripper_path = args.gripper_path
 
     color_img_topic = args.color_img_topic
@@ -215,7 +216,7 @@ if __name__ == '__main__':
 
     print()
     print(f"RGB-D camera parameters file: {GREEN}{cam_params_path}{RESET}")
-    print(f"handeye calib file: {GREEN}{handeye_calib_path}{RESET}")
+    print(f"handeye calib file: {GREEN}{calib_handeye_path}{RESET}")
     print(f"gripper calib file save path: {GREEN}{gripper_path}{RESET}")
     print(f"color image topic: {GREEN}{color_img_topic}{RESET}")
     print(f"depth image topic: {GREEN}{depth_img_topic}{RESET}")
@@ -230,7 +231,7 @@ if __name__ == '__main__':
     print()
 
     # 读取手眼标定矩阵
-    T_end_cam, _ = read_handeye_calib(handeye_calib_path)
+    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
     print()
 
     # 创建机械臂对象
@@ -284,8 +285,8 @@ if __name__ == '__main__':
           f'  q: 退出程序\n'
           f'  a: 调整末端姿态,使末端坐标系的 Z 轴指向下方\n'
           f'  t: 从当前 RGB-D 图像计算夹爪在相机坐标系下的位姿\n'
-          f'  ,: 缩小夹爪\n'
-          f'  .: 放大夹爪\n'
+          f'  <: 缩小夹爪\n'
+          f'  >: 放大夹爪\n'
           f'  s: 保存标定结果到文件\n'
           f'{RESET}')
 
@@ -350,13 +351,15 @@ if __name__ == '__main__':
         if key == 't':
 
             # 获取 RGB-D 图像
-            frames = cam_node.get_frames(do_spin_once=True)
+            frames = cam_node.get_frames(do_spin_once=True, frames_num=5)
             if frames is None:
                 logging.warning('No RGB-D frame available yet.')
                 continue
             # end if
 
-            color_img, depth_img = frames[0]
+            color_img = frames[0][0]
+            depth_img_list = [frame[1] for frame in frames]
+            depth_img = depth_mean_filter(depth_img_list)
             logging.info(f"rgb_img shape: {color_img.shape}, depth_img shape: {depth_img.shape}")
 
             gray_img = cv2.cvtColor(color_img, cv2.COLOR_BGR2GRAY)

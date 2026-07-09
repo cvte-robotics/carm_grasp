@@ -162,7 +162,7 @@ def read_rgbd_params(json_file_path: str) -> Tuple[List[float], List[float], flo
 # end def read_rgbd_params
 
 
-def read_handeye_calib(json_file_path: str) -> Tuple[np.ndarray, bool]:
+def read_calib_handeye(json_file_path: str) -> Tuple[np.ndarray, bool]:
     """
     读取手眼标定矩阵    
     Args:
@@ -204,7 +204,7 @@ def read_handeye_calib(json_file_path: str) -> Tuple[np.ndarray, bool]:
     # end if
 
     return T, eye_in_hand
-# end def read_handeye_calib
+# end def read_calib_handeye
 
 
 def inv_tf(T: np.ndarray) -> np.ndarray:

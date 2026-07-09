@@ -14,7 +14,8 @@ echo
 calib_board_info='[0.0352, 0.01056, 6, 6]'  
 
 # 图像目录
-img_dir="${root_dir}/demo/data/collect/calib_camera/cam0"  
+img_dir="${root_dir}/demo/data/collect/g305/calib_camera/cam0" 
+# img_dir="${root_dir}/demo/data/collect/d405/calib_camera/cam0"  
 
 
 ############################################## 可执行程序 ##############################################

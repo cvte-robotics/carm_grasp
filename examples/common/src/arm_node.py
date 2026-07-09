@@ -23,7 +23,7 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
-    KeyboardReader, read_handeye_calib,
+    KeyboardReader, read_calib_handeye,
     reset_empty_str
 )
 from core.arm_wrapper import ArmWrapper
@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--handeye_calib_path", type=str, required=True,
+    parser.add_argument("--calib_handeye_path", type=str, required=True,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
 
     parser.add_argument("--gripper_path", type=str, required=True,
@@ -55,21 +55,21 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    handeye_calib_path = args.handeye_calib_path
+    calib_handeye_path = args.calib_handeye_path
     gripper_path = args.gripper_path
 
     frame_id = args.frame_id
     pc_frame_id = args.pc_frame_id
 
     print()
-    print(f'handeye_calib_path: {BLUE}{handeye_calib_path}{RESET}')
+    print(f'calib_handeye_path: {BLUE}{calib_handeye_path}{RESET}')
     print(f'gripper_path: {BLUE}{gripper_path}{RESET}')
     print(f'frame_id: {BLUE}{frame_id}{RESET}')
     print(f'pc_frame_id: {BLUE}{pc_frame_id}{RESET}')
     print()
 
     # 读取手眼标定矩阵
-    T_end_cam, _ = read_handeye_calib(handeye_calib_path)
+    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
     print()
 
     # 读取夹爪模型

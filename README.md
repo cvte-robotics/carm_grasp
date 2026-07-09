@@ -1,123 +1,337 @@
 # carm_grasp
 
-基于 CARM 机械臂、ROS2 和 RGB-D 相机的抓取示例工程，覆盖机械臂控制、相机与手眼标定、夹爪标定、动作模板录制回放，以及基于 AprilTag 的 2D / 3D 抓取示例。
+基于 CARM 机械臂、ROS2 和 RGB-D 相机的抓取示例工程，覆盖机械臂控制、相机与手眼标定、夹爪标定、动作模板录制回放，以及基于 AprilTag 的 2D / 3D 视觉伺服抓取示例。
 
-注意：
+> **注意：**
+> - 当前 2D / 3D 抓取示例都假设目标表面可稳定检测到 AprilTag。
+> - 3D 抓取不仅依赖 RGB-D 图像，还依赖手眼标定和夹爪几何模型（用于简易的碰撞检测）。
+---
 
-- 当前 2D / 3D 抓取示例都假设目标表面可稳定检测到 AprilTag。
-- 3D 抓取不仅依赖 RGB-D 图像，还依赖手眼标定和夹爪几何模型。
+## 硬件支持
 
-## TODO
+| 硬件 | 说明 |
+|------|------|
+| **CARM 机械臂** | 自研六轴机械臂，支持 Position / MIT / TEACH / PF 控制模式 |
+| **Intel RealSense D405** | RGB-D 相机（眼在手），彩色 + 深度对齐 |
+| **Orbbec Gemini 305** | RGB-D 相机（眼在手），彩色 + 深度对齐 |
 
-添加视频说明
+---
 
+## 所需物料
+
+| 物料 | 说明 | 图例 |
+|------|------|------|
+| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="200"><br/><img src="docs/real_calib_board.jpg" width="200"><br/>左：打印用原图 ｜ 右：实拍 |
+| **夹爪标定工具** | 中心贴有 AprilTag（ID=0）的平板，用于标定夹爪→相机位姿 | <img src="docs/real_obj_calib_gripper0.jpg" width="200"> |
+| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="200"><br/><img src="docs/real_obj_tag.jpg" width="200"><br/>左：打印用原图 ｜ 右：实拍 |
+| **相机支架** | 确保相机 Z 轴与末端 Z 轴夹角 < 45° | <img src="docs/cam_bracket.jpg" width="200"> |
+
+---
 ## 依赖
 
-- [apriltag2](https://github.com/kai-kai-tang/apriltag2)
-- [carm](https://pypi.org/project/carm/0.1.20260615/)
-- ROS2（代码里使用到 `rclpy`、`cv_bridge`、`message_filters`、`tf2_ros` 等 ROS2 Python 组件）
-- Python 依赖：`numpy`、`opencv-python`、`open3d`、`mmengine`、`transforms3d`
+| 组件 | 版本 | 用途 |
+|------|------|------|
+| [apriltag2](https://github.com/cvte-robotics/apriltag2) | — | AprilTag 检测与位姿估计 |
+| [carm](https://pypi.org/project/carm/) | ≥ 0.1.20260706 | CARM 机械臂 Python SDK |
+| ROS2 (Foxy / Humble) | — | `rclpy`、`cv_bridge`、`message_filters`、`tf2_ros` |
+| numpy | 1.24.4 | 数值计算 |
+| opencv-python | 4.7.0.72 | 图像处理、相机标定、手眼标定 |
+| open3d | 0.19.0 | 点云处理与可视化 |
+| mmengine | — | 配置文件读写 |
+| transforms3d | — | 三维刚体变换（四元数/旋转矩阵/欧拉角互转） |
 
-示例安装：
+### 安装示例
 
 ```bash
-pip install numpy==1.26.4 opencv-python==4.7.0.72 open3d==0.19.0 mmengine transforms3d
-pip install carm==0.1.20260615
+# Python 依赖
+pip install numpy==1.24.4 opencv-python==4.7.0.72 open3d==0.19.0 mmengine transforms3d
+
+# CARM SDK
+pip install carm==0.1.20260706
 ```
 
-说明：
+> `apriltag2` 的安装方式取决于你的环境，请按各项目说明配置。
+> `examples/*/scripts/*.sh` 默认同时写了 Foxy / Humble 的 `source` 语句，按需注释。
 
-- `apriltag2` 的安装方式取决于你的环境，请按各自项目说明配置。
-- `examples/*/scripts/*.sh` 默认同时写了 Foxy / Humble 的 `source` 语句，实际使用时建议只保留你本机存在的 ROS2 发行版。
+---
 
-## 目录说明
+## 目录结构
 
-- `core/`：机械臂控制、相机 ROS2 订阅、视觉匹配、几何变换、RViz 可视化等基础封装。
-- `examples/common/src/`：基础能力示例，包括状态发布、动作模板录制（`action_record.py`）与回放（`action_play.py`）、自动采集（`auto_collect.py`）、相机标定、手眼标定、夹爪标定。
-- `examples/benchmark/src/`：抓取基准示例，包括 2D 抓取模板录制/测试和 3D 抓取模板录制/测试。
-- `examples/*/scripts/`：对应 Python 示例的 shell 启动脚本，已预填 ROS 环境和默认参数。
-- `demo/`：开箱即用的演示目录，包含预录制的动作模板（`data/action/`）、采集数据样例（`data/collect/`）、标定结果（`data/calib/`）和可直接运行的启动脚本（`scripts/`）。
-- `data/calib/`：相机参数、手眼标定结果、夹爪模型等标定文件。
-- `data/benchmark/tmpl/`：2D / 3D 抓取模板目录与仓库内置样例。
-- `rviz/`：RViz 配置。
+```
+carm_grasp/
+├── core/                          # 核心库：机械臂封装、视觉匹配、ROS2 工具、几何变换
+│   ├── arm_wrapper.py             #    CARM 机械臂 SDK 统一封装
+│   ├── arm_utils.py               #    夹爪几何模型 (GripperBody) 与碰撞检测 (CollisionDetector)
+│   ├── arm_ros_utils.py           #    机械臂 ROS2 工具：位姿发布、Marker 可视化、ArmNode
+│   ├── cam_ros_utils.py           #    相机 ROS2 节点：多话题时间同步订阅 (CamNode)
+│   ├── vision_utils.py            #    视觉工具：点云生成、2D/3D AprilTag 匹配器、投影变换
+│   └── utils.py                   #    通用工具：彩色打印、键盘读取、标定文件读写、TF 工具
+│
+├── examples/
+│   ├── common/
+│   │   ├── src/                   # 基础能力示例
+│   │   │   ├── action_record.py   #   动作模板录制
+│   │   │   ├── action_play.py     #   动作模板回放
+│   │   │   ├── auto_collect.py    #   自动采集（按模板依次执行并保存机械臂状态+图像）
+│   │   │   ├── arm_node.py        #   机械臂 ROS2 状态发布节点
+│   │   │   ├── calib_camera.py    #   相机内参标定（基于 AprilTag 标定板）
+│   │   │   ├── calib_gripper.py   #   夹爪标定（夹爪→相机位姿）
+│   │   │   ├── calib_handeye.py   #   手眼标定（AX=XB）
+│   │   │   └── create_collect_actions.py  # 自动生成采集动作模板（半球面采样）
+│   │   └── scripts/               # 对应 shell 启动脚本
+│   │
+│   └── benchmark/
+│       ├── src/                   # 抓取基准示例
+│       │   ├── create_tmpl_grasp_2d.py  # 创建 2D 抓取模板
+│       │   ├── test_tmpl_grasp_2d.py    # 测试 2D 视觉伺服抓取
+│       │   ├── create_tmpl_grasp_3d.py  # 创建 3D 抓取模板
+│       │   └── test_tmpl_grasp_3d.py    # 测试 3D 视觉伺服抓取
+│       └── scripts/               # 对应 shell 启动脚本
+│
+├── demo/                          # 开箱即用演示
+│   ├── data/
+│   │   ├── action/                #   预录制动作模板（标定用 / 采集用）
+│   │   ├── calib/                 #   标定结果（D405 / G305 相机参数、手眼矩阵、夹爪模型）
+│   │   └── collect/               #   采集数据样例
+│   └── scripts/                   #   可直接运行的启动脚本
+│
+├── data/
+│   ├── action/                    # 动作模板数据
+│   └── calib/                     # 标定文件
+│
+├── rviz/                          # RViz 配置文件
+├── scripts/                       # 通用脚本（open_rviz.sh）
+├── results/                       # 调试/运行结果输出
+└── test/                          # 测试脚本
+```
 
-## core 模块说明
+---
 
-### arm_wrapper.py
+## 工作流程
 
-机械臂 SDK 的统一封装，当前对接 `carm`。主要提供：
+```mermaid
+flowchart TD
+    A["自动采集相机标定数据<br/>（如果已知相机内参，此步骤可省略）<br/>auto_collect.py"] --> B["相机标定<br/>（如果已知相机内参，此步骤可省略）<br/>calib_camera.py"]
+    B --> C["自动采集手眼标定数据<br/>（如果已知手眼标定参数，此步骤可省略）<br/>auto_collect.py"]
+    C --> D["手眼标定<br/>（如果已知手眼标定参数，此步骤可省略）<br/>calib_handeye.py"]
+    D --> E["夹爪标定<br/>（如果已知夹爪标定参数，此步骤可省略，此步骤仅3D抓取会用到）<br/>calib_gripper.py"]
+    E --> F{选择抓取模式}
+    F -->|2D| G["创建 2D 抓取模板<br/>create_tmpl_grasp_2d.py"]
+    F -->|3D| H["创建 3D 抓取模板<br/>create_tmpl_grasp_3d.py"]
+    G --> I["测试 2D 抓取<br/>test_tmpl_grasp_2d.py"]
+    H --> J["测试 3D 抓取<br/>test_tmpl_grasp_3d.py"]
+```
 
-- 控制模式切换：`POSITION`、`TEACH`、`PF` 等。
-- 状态读取：关节角、末端位姿、夹爪开口、外力。
-- 运动控制：`set_joints`、`set_pose`、`track_pose`、`set_gripper_dist`。
-- 工具函数：位姿矩阵与 `[tx, ty, tz, qx, qy, qz, qw]` 之间的转换，批量逆解。
+### 前置步骤（标定）
 
-### arm_utils.py
+**1. 相机内参标定** — 使用 `auto_collect.py` 采集标定板多视角图像，再用 `calib_camera.py` 标定针孔模型的内参和畸变系数，生成 `cam_params.json`。
 
-机械臂与夹爪相关的几何工具：
+<p align="center"><img src="docs/auto_collect.gif" width="640"></p>
 
-- `GripperBody`：夹爪几何模型，保存 `T_cam_gripper` 并生成夹爪矩形顶点。
-- `CollisionDetector`：基于深度图和夹爪投影的碰撞检测工具。
-- `check_arm_pose`：检查末端朝向和夹爪高度是否合理。
-- `compute_axis_aligned_pose`：将末端或相机某个轴对齐到基座目标方向。
+**2. 手眼标定** — 眼在手（eye-in-hand）场景下，求解 $AX = XB$ 得到末端到相机的变换矩阵 $T_{end}^{cam}$。先用 `auto_collect.py` 采集末端位姿与对应图像，再用 `calib_handeye.py` 标定，生成 `calib_handeye.json`。
 
-### arm_ros_utils.py
+**3. 夹爪标定** — 使末端朝下，张开夹爪并对准夹爪上的 AprilTag（ID=0）平面，用 `calib_gripper.py` 采集 RGB-D 图像估计夹爪位姿，生成 `gripper_body.json`。
 
-机械臂状态和目标状态的 ROS2 可视化工具：
+<p align="center">
+  <img src="docs/real_obj_calib_gripper1.jpg" height="300">
+  <img src="docs/calib_gripper.png" height="300">
+</p>
 
-- 位姿 / TF / Marker 转 ROS 消息。
-- `ArmNode`：发布实际机械臂位姿、关节角、夹爪 Marker。
-- `TargetArmNode`：发布目标位姿与目标夹爪 Marker，方便在 RViz 中验证规划结果。
+### 抓取模式
 
-### cam_ros_utils.py
+#### 2D 抓取（3 自由度：$x, y, \theta$）
 
-相机 ROS2 工具：
+适用于物体放置在水平面上、仅需平面定位的场景（目前不允许视野里有多个贴了 apriltag 的物体）。
 
-- `CamNode` 可同步订阅多路图像话题。
-- 支持按需拉取同步帧 `get_frames()`。
-- 支持等待相机内参消息 `get_cam_infos()`。
+<p align="center"><img src="docs/grasp_2d.gif" height="480"></p>
 
-### vision_utils.py
+**模板录制** (`create_tmpl_grasp_2d.py`) — 录制 5 个状态：抓取位姿、近距检测位姿（×2）、远距检测位姿（×2），保存物体在图像中的 2D 位姿和末端状态。
 
-视觉与定位相关工具：
+| 状态 | 说明 | 示意图 |
+|------|------|--------|
+| grasp | 抓取位姿：末端朝下，夹爪张开至刚好能抓取物体 | <img src="docs/grasp_2d_grasp.jpg" height="240"> |
+| near / next_near | 近距检测位姿：略高于抓取位姿，末端朝下，夹爪张开至最大 | <img src="docs/grasp_2d_near.jpg" height="200"> <img src="docs/grasp_2d_near_next.jpg" height="200"> |
+| far / next_far | 远距检测位姿：末端朝下，夹爪张开至最大 | <img src="docs/grasp_2d_far.jpg" height="200"> <img src="docs/grasp_2d_far_next.jpg" height="200"> |
 
-- RGB-D / 深度图转点云。
-- 深度均值滤波 `depth_mean_filter()`。
-- AprilTag 2D / 3D 位姿计算。
-- `ImageUndistorter`：图像和点去畸变。
-- `TagMatcher2D`：识别 AprilTag 并估计平面位姿 `[tx, ty, theta]`。
-- `TagMatcher3D`：识别 / 跟踪 AprilTag，并输出 `T_cam_tag`。
-- `compute_locate_error()`：评估 6D 定位误差。
+**视觉伺服抓取** (`test_tmpl_grasp_2d.py`)：
+- 使用「虚拟相机」归一化坐标系，在 near/far 模板之间线性插值 Jacobian 比值
+- 迭代调整末端位姿直到物体在图像中的观测与模板一致（平移 < 1mm，旋转 < 2°），再执行抓取
 
-### utils.py
+#### 3D 抓取（6 自由度）
 
-通用工具：
+适用于物体在空间中具有任意位姿的场景。
 
-- 读取 `cam_params.json`、`calib_handeye.json` 等配置文件。
-- 常用坐标变换：`inv_tf()`、`transform_delta_pose()`、`compute_aligned_pose()`。
-- 键盘与调试辅助：`wait_key()`、`get_key()`、`KeyboardReader`。
+<p align="center"><img src="docs/grasp_3d.gif" height="480"></p>
 
-## 运行前准备
+**模板录制** (`create_tmpl_grasp_3d.py`) — 录制 2 个状态：抓取位姿和预备位姿，保存物体在相机坐标系中的 3D 位姿 $T_{cam}^{model}$。
 
-1. 确保机械臂可以通过 `carm` 正常连接。
-2. 确保 ROS2 环境可用，并且相机相关话题已经发布。
-3. 根据实际设备修改 `examples/common/scripts/*.sh` 和 `examples/benchmark/scripts/*.sh` 中的参数，重点检查：
-	- `ROS_DOMAIN_ID`
-	- 彩色 / 深度图像话题名
-	- `pc_frame_id`
-	- 模板目录和结果目录
-	- `detect_pose` / `place_pose`
-4. 根据要运行的脚本准备标定文件：
-	- `data/calib/cam_params.json`：2D / 3D 视觉脚本都需要。
-	- `data/calib/calib_handeye.json`：`arm_node.py`、2D / 3D 抓取、夹爪标定都需要。
-	- `data/calib/gripper_body.json`：`arm_node.py` 发布夹爪 Marker 时需要，3D 抓取测试也需要。
-5. 如果你希望快速体验完整流程，可直接使用 `demo/` 目录下的预置数据和脚本：
-	- `demo/scripts/` 中提供了所有核心脚本的副本，参数已预配置指向 `demo/data/`。
-	- 先运行 `demo/scripts/action_record.sh` 录制采集轨迹，再运行 `demo/scripts/auto_collect.sh` 执行自动采集，最后运行 `calib_handeye.sh` / `calib_camera.sh` 完成标定。
+| 状态 | 说明 | 示意图 |
+|------|------|--------|
+| grasp | 抓取位姿：末端朝下，夹爪张开至刚好能抓取物体 | <img src="docs/grasp_2d_grasp.jpg" height="240"> |
+| ready | 预备位姿：略高于抓取位姿，便于过渡到抓取位姿 | <img src="docs/grasp_2d_near.jpg" height="240"> |
 
-## examples/common/src 说明
+**视觉伺服抓取** (`test_tmpl_grasp_3d.py`)：
+1. **Match** — 匹配物体，获取初始 $T_{cam}^{model}$
+2. **Compute & Move** — 计算预备位姿使物体在相机中的位姿与模板一致，移动机械臂
+3. **Refine** — 迭代细化（track → 重算预备位姿 → 移动），最多 2 轮
+4. **Grasp** — 执行最终抓取位姿 → 闭合夹爪 → 抬高
+5. 包含基于夹爪几何模型的简易碰撞检测（夹爪投影到深度图判断干涉）
 
-### arm_node.py
+---
+
+## core 模块 API 概览
+
+### `arm_wrapper.py` — ArmWrapper
+
+CARm 机械臂 SDK 的统一封装类。
+
+```python
+from core.arm_wrapper import ArmWrapper
+
+arm = ArmWrapper(ip="10.42.0.101", control_mode=ArmWrapper.ControlMode.POSITION, speed_level=50)
+
+# 控制模式
+arm.set_control_mode(ArmWrapper.ControlMode.PF)   # POSITION / MIT / TEACH / PF
+
+# 运动控制
+arm.set_joints([0, 0, 0, 0, 0, 0])                 # 关节角控制
+arm.set_pose(T_base_end)                           # 末端位姿控制 (4×4)
+arm.set_gripper_dist(0.05)                         # 夹爪开度 (m)
+
+# 状态查询
+T = arm.get_pose()                                 # 末端位姿
+joints = arm.get_joints()                          # 关节角
+dist = arm.get_gripper_dist()                      # 夹爪距离
+arm.set_speed_level(80)                            # 速度 1-100
+```
+
+### `arm_utils.py` — GripperBody / CollisionDetector
+
+- **GripperBody**：用两个矩形面片建模夹爪几何体，支持从 AprilTag 角点初始化夹爪→相机位姿，以及计算任意目标坐标系下的夹爪 3D 顶点。
+- **CollisionDetector**：将夹爪投影到参考深度图，通过比较投影深度与真实深度检测碰撞（仅适用于 eye-in-hand）。
+
+### `cam_ros_utils.py` — CamNode
+
+多话题时间同步的 ROS2 相机节点，基于 `message_filters.ApproximateTimeSynchronizer`。
+
+```python
+cam_node = CamNode(
+    img_topic_list=["/color/image_raw", "/depth/image_raw"],
+    cam_info_topic_list=["/color/camera_info"],
+    reliability=1  # 0=SYSTEM_DEFAULT, 1=RELIABLE, 2=BEST_EFFORT
+)
+imgs = cam_node.get_frames()  # 获取一帧同步图像
+```
+
+### `vision_utils.py` — 视觉匹配与工具
+
+| 类/函数 | 说明 |
+|---------|------|
+| `TagMatcher2D` | 2D AprilTag 匹配器，输出标签 ID、角点、归一化平面位姿 $(nx, ny, \theta)$ |
+| `TagMatcher3D` | 3D AprilTag 匹配器，输出标签 ID、角点、$T_{cam}^{tag}$，支持 match/track 两种模式 |
+| `rgbd_to_point_cloud()` | RGB-D → 彩色点云 (Open3D) |
+| `depth_to_point_cloud()` | 深度图 → 点云 |
+| `depth_mean_filter()` | 多帧深度图均值滤波（按观测次数加权） |
+| `compute_locate_error()` | 计算定位误差（位置 mm + 角度 deg），支持对称物体 |
+| `compute_projective_transformation()` | 计算虚拟相机投影变换矩阵 |
+| `compute_tag_pose_2d()` | 从 AprilTag 2D 角点计算平面位姿 |
+| `compute_tag_mask()` | 生成标签区域掩码 |
+
+### `utils.py` — 通用工具
+
+| 函数 | 说明 |
+|------|------|
+| `read_cam_params()` | 读取相机内参 JSON |
+| `read_calib_handeye()` | 读取手眼标定结果 JSON |
+| `read_rgbd_params()` | 读取 RGB-D 相机参数（内参 + 深度缩放） |
+| `inv_tf()` | 求位姿矩阵的逆 |
+| `wait_key()` | 等待按键（支持 debug 模式暂停） |
+| `KeyboardReader` | 非阻塞键盘读取类 |
+| `reset_empty_str()` | 空字符串转 None，路径规范化 |
+
+---
+
+## 快速开始
+
+### 前置要求
+
+- 机械臂可通过 `carm` 正常连接（默认 IP：`10.42.0.101`）
+- ROS2 环境已配置，相机话题正常发布
+- 根据实际设备修改 `demo/scripts/*.sh` 中的话题名、`ROS_DOMAIN_ID`、`detect_pose` / `place_pose` 等参数
+
+### 标定流程
+
+> 如果你已有标定文件，可直接跳到抓取流程。也可直接使用 `demo/data/calib/` 下的预置标定结果快速体验。
+
+```bash
+cd demo/scripts
+
+# 1. 录制采集动作模板（拖动机械臂到标定板不同视角，按 s 保存）
+./action_record.sh
+
+# 2. 自动执行模板，采集图像与机械臂位姿
+./auto_collect.sh
+
+# 3. 相机内参标定 → 生成 cam_params.json
+./calib_camera.sh
+
+# 4. 手眼标定 → 生成 calib_handeye.json
+./calib_handeye.sh
+
+# 5. 夹爪标定 → 生成 gripper_body.json（仅 3D 抓取需要）
+./calib_gripper.sh
+
+# 6. 启动 RViz 检查标定结果与 TF 树
+../scripts/open_rviz.sh
+```
+
+### 2D 抓取流程
+
+```bash
+cd demo/scripts
+
+# 1. 录制 2D 抓取模板（需先完成相机标定与手眼标定）
+#    修改 test_tmpl_grasp_2d.sh 中的 detect_pose / place_pose
+./test_tmpl_grasp_2d.sh
+```
+
+### 3D 抓取流程
+
+```bash
+cd demo/scripts
+
+# 1. 录制 3D 抓取模板（需先完成相机标定、手眼标定和夹爪标定）
+#    修改 test_tmpl_grasp_3d.sh 中的 detect_pose / place_pose
+./test_tmpl_grasp_3d.sh
+```
+
+### 动作录制与回放
+
+```bash
+./action_record.sh    # 录制通用动作模板
+./action_play.sh      # 回放动作模板
+```
+
+### 常见问题
+
+- 抓取位姿明显不对 → 优先检查 `calib_handeye.json`、`cam_params.json` 和话题配置
+- 2D / 3D 抓取脚本均依赖手眼标定结果；3D 抓取额外依赖 `gripper_body.json`
+- shell 脚本默认兼容 Foxy / Humble，按需注释对应 `source` 行
+- `demo/data/` 下预置了标定结果和动作模板，可开箱即用
+
+---
+
+## 许可
+
+MIT License — 详见 [LICENSE](./LICENSE)。
+
+---
+
+## 脚本参考
+
+### common — 基础能力
+
+#### arm_node.py
 
 用途：持续发布机械臂位姿、关节角、夹爪 Marker，以及从 `frame_id` 到 `pc_frame_id` 的 TF，方便在 RViz 中观察状态。
 
@@ -145,7 +359,7 @@ pip install carm==0.1.20260615
 bash examples/common/scripts/arm_node.sh
 ```
 
-### action_record.py
+#### action_record.py
 
 用途：录制非视觉动作模板（又名"动作录制"）。通过拖动或位置控制模式将机械臂移动到目标位姿，按 `s` 保存当前状态为模板。每个模板保存为一个 JSON 文件，包含：
 
@@ -181,7 +395,7 @@ bash examples/common/scripts/arm_node.sh
 bash examples/common/scripts/action_record.sh
 ```
 
-### action_play.py
+#### action_play.py
 
 用途：顺序读取模板目录中的 `0.json`、`1.json`、`2.json`...，循环回放模板里的关节角和夹爪开口（又名"动作回放"）。可单独使用，也可用于验证 `action_record.py` 录制的模板是否正确。
 
@@ -202,7 +416,7 @@ bash examples/common/scripts/action_record.sh
 bash examples/common/scripts/action_play.sh
 ```
 
-### auto_collect.py
+#### auto_collect.py
 
 用途：读取 `action_record.py` 录制的一组动作模板，自动依次执行每个模板，并在每个位姿处采集同步图像和机械臂位姿。是手眼标定、相机标定及其他批量数据采集任务的核心自动化工具。
 
@@ -235,7 +449,7 @@ bash examples/common/scripts/action_play.sh
 bash examples/common/scripts/auto_collect.sh
 ```
 
-### calib_camera.py
+#### calib_camera.py
 
 用途：读取图像目录中的标定板图片，执行针孔相机标定。
 
@@ -260,7 +474,7 @@ bash examples/common/scripts/auto_collect.sh
 bash examples/common/scripts/calib_camera.sh
 ```
 
-### calib_handeye.py
+#### calib_handeye.py
 
 用途：读取机械臂位姿和对应图像，定位标定板后执行手眼标定。
 
@@ -286,7 +500,7 @@ bash examples/common/scripts/calib_camera.sh
 bash examples/common/scripts/calib_handeye.sh
 ```
 
-### calib_gripper.py
+#### calib_gripper.py
 
 用途：根据 AprilTag 平面和深度图估计夹爪在相机坐标系下的位姿，并生成 `data/calib/gripper_body.json`。
 
@@ -321,9 +535,9 @@ bash examples/common/scripts/calib_handeye.sh
 bash examples/common/scripts/calib_gripper.sh
 ```
 
-## examples/benchmark/src 说明
+### benchmark — 抓取基准
 
-### create_tmpl_grasp_2d.py
+#### create_tmpl_grasp_2d.py
 
 用途：录制 2D 抓取模板。脚本保存抓取状态，以及 near / next_near / far / next_far 四组带目标观测的状态，用于后续根据图像中的目标 2D 位姿修正机械臂运动。
 
@@ -374,7 +588,7 @@ bash examples/benchmark/scripts/create_tmpl_grasp_2d.sh
 4. 移动到更远的观察位姿，按 `f` 保存 `far`。
 5. 在 `far` 位姿基础上再做一小段平面内移动，按 `d` 保存 `next_far`。
 
-### test_tmpl_grasp_2d.py
+#### test_tmpl_grasp_2d.py
 
 用途：读取 2D 模板，检测图像中的目标 2D 位姿，计算末端修正量，逐步逼近目标并完成抓取与放置。
 
@@ -415,7 +629,7 @@ bash examples/benchmark/scripts/create_tmpl_grasp_2d.sh
 bash examples/benchmark/scripts/test_tmpl_grasp_2d.sh
 ```
 
-### create_tmpl_grasp_3d.py
+#### create_tmpl_grasp_3d.py
 
 用途：录制 3D 抓取所需模板。当前实现实际会保存抓取位姿和预备位姿，并在预备位姿下执行一次 3D 匹配，记录 `T_cam_model`。
 
@@ -463,7 +677,7 @@ bash examples/benchmark/scripts/create_tmpl_grasp_3d.sh
 1. 将机械臂移动到实际抓取位姿，按 `g` 保存 `grasp.json`。
 2. 将机械臂移动到抓取前的预备位姿，确保画面与深度稳定，按 `r` 保存 `ready.json`。
 
-### test_tmpl_grasp_3d.py
+#### test_tmpl_grasp_3d.py
 
 用途：读取 3D 抓取模板和夹爪模型，通过 3D 匹配与跟踪计算预备位姿和抓取位姿，完成完整的 6D 抓取流程。
 
@@ -504,91 +718,4 @@ bash examples/benchmark/scripts/create_tmpl_grasp_3d.sh
 ```bash
 bash examples/benchmark/scripts/test_tmpl_grasp_3d.sh
 ```
-
-## 推荐使用流程
-
-### 标定与基础调试流程
-
-1. 录制一组采集动作模板（拖动机械臂到多个不同视角，在每个视角按 `s` 保存）：
-
-	```bash
-	bash examples/common/scripts/action_record.sh
-	```
-
-2. 自动执行这些模板并采集图像 / 位姿：
-
-	```bash
-	bash examples/common/scripts/auto_collect.sh
-	```
-
-3. 用采集结果标定相机内参：
-
-	```bash
-	bash examples/common/scripts/calib_camera.sh
-	```
-
-4. 用采集结果标定手眼：
-
-	```bash
-	bash examples/common/scripts/calib_handeye.sh
-	```
-
-5. 如需 RViz 夹爪显示或 3D 抓取，再做夹爪标定：
-
-	```bash
-	bash examples/common/scripts/calib_gripper.sh
-	```
-
-6. 用 RViz 检查机械臂状态和 TF：
-
-	```bash
-	bash examples/common/scripts/arm_node.sh
-	```
-
-7. 如需录制和验证通用动作模板，请让录制脚本与回放脚本指向同一目录后再运行：
-
-	```bash
-	bash examples/common/scripts/action_record.sh
-	bash examples/common/scripts/action_play.sh
-	```
-
-### 2D 抓取流程
-
-1. 录制 2D 抓取模板：
-
-	```bash
-	bash examples/benchmark/scripts/create_tmpl_grasp_2d.sh
-	```
-
-2. 修改 `examples/benchmark/scripts/test_tmpl_grasp_2d.sh` 中的 `detect_pose` 和 `place_pose`，或手动传参。
-
-3. 运行 2D 抓取测试：
-
-	```bash
-	bash examples/benchmark/scripts/test_tmpl_grasp_2d.sh
-	```
-
-### 3D 抓取流程
-
-1. 确保已完成相机标定、手眼标定和夹爪标定。
-2. 录制 3D 抓取模板：
-
-	```bash
-	bash examples/benchmark/scripts/create_tmpl_grasp_3d.sh
-	```
-
-3. 修改 `examples/benchmark/scripts/test_tmpl_grasp_3d.sh` 中的 `detect_pose` 和 `place_pose`，或手动传参。
-
-4. 运行 3D 抓取测试：
-
-	```bash
-	bash examples/benchmark/scripts/test_tmpl_grasp_3d.sh
-	```
-
-## 补充说明
-
-- 示例脚本里的相机话题默认使用 RealSense D405，请按你的设备修改。
-- `data/benchmark/tmpl/` 中已经提供了一套模板结构，可作为录制时的参考。
-- 2D / 3D 抓取脚本都依赖手眼标定结果；若抓取位姿明显不对，优先检查 `calib_handeye.json`、`cam_params.json` 和话题配置是否正确。
-- `arm_node.py` 与 3D 抓取都使用 `gripper_body.json`；仓库内可以放样例文件，但在真实设备上建议重新标定。
 

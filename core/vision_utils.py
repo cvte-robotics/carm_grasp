@@ -150,7 +150,7 @@ def compute_locate_error(expected_T_cam_model: np.ndarray,
     Args:
         expected_T_cam_model (np.ndarray): 期望的物体到相机的变换矩阵, 4*4
         actual_T_cam_model (np.ndarray): 实际的物体到相机的变换矩阵, 4*4
-        sym_tfs (np.ndarray): 对称变换矩阵数组, N*4*4, 如果物体具有对称性, 则在计算误差时应该考虑所有的对称变换, 取误差最小的那个作为最终误差. 
+        sym_tfs (np.ndarray): 对称变换矩阵数组, N * 4*4, 如果物体具有对称性, 则在计算误差时应该考虑所有的对称变换, 取误差最小的那个作为最终误差. 
             如果没有对称变换, 则传入 None 或者空数组即可
     Returns:
         (Tuple[float, float]): 位置误差( mm )和角度误差( deg )
@@ -192,7 +192,6 @@ def compute_projective_transformation(src_K: np.ndarray,
         src_K (np.ndarray): src 相机的内参矩阵, 3*3 float64
         src_img_size (Tuple[int, int]): src 图像尺寸 (w,h)
         R_dst_src (np.ndarray): 从 src 相机坐标系到 dst 相机坐标系的旋转矩阵
-        eps (float): z 轴阈值, 避免除零
     Returns:
         ( Tuple[np.ndarray, Tuple[int, int], np.ndarray] ): 包含以下内容的元组:
             - dst_K (np.ndarray): dst 相机的内参矩阵( 焦距与 src 相机保持一致 ), 3*3 float64
@@ -572,9 +571,10 @@ class TagMatcher2D:
             (Tuple[List[Result], str]): 匹配结果列表和返回的消息
         """
 
+        result_dir = f"{self.debug_dir}/match"
+
         # 创建保存匹配结果的目录
-        if debug_level > 0 and self.debug_dir is not None:
-            result_dir = f"{self.debug_dir}/match"
+        if self.debug_dir is not None and not os.path.exists(result_dir):
             os.makedirs(result_dir, exist_ok=True)
             logging.info(f"match results will be saved to: {result_dir}")
         # end if
@@ -584,6 +584,10 @@ class TagMatcher2D:
 
         # 识别 AprilTag 实例
         tag_list = self.detector.detect(un_img, -1)
+
+        if (len(tag_list) == 0 or debug_level >= 1) and os.path.exists(result_dir):
+            cv2.imwrite(f"{result_dir}/color.png", un_img)
+        # end if
 
         if len(tag_list) == 0:
             msg = "no tag detected"
@@ -601,7 +605,7 @@ class TagMatcher2D:
             result_list.append(result)
         # end for
 
-        # 选取分数最高的 top_k 个实例( pose_2d[0]**2 + pose_2d[1]**2 越小排名月靠前 )
+        # 选取分数最高的 top_k 个实例( pose_2d[0]**2 + pose_2d[1]**2 越小排名越靠前 )
         if top_k > 0 and len(result_list) > top_k:
             result_list.sort(key=lambda r: r.pose_2d[0]**2 + r.pose_2d[1]**2)
             result_list = result_list[:top_k]  # 选取前 top_k 个实例
@@ -730,9 +734,10 @@ class TagMatcher3D:
             (Tuple[List[Result], str]): 匹配结果列表和返回的消息
         """
 
+        result_dir = f"{self.debug_dir}/match"
+
         # 创建保存匹配结果的目录
-        if debug_level > 0 and self.debug_dir is not None:
-            result_dir = f"{self.debug_dir}/match"
+        if self.debug_dir is not None and not os.path.exists(result_dir):
             os.makedirs(result_dir, exist_ok=True)
             logging.info(f"match results will be saved to: {result_dir}")
         # end if
@@ -742,6 +747,10 @@ class TagMatcher3D:
 
         # 识别 AprilTag 实例
         tag_list = self.detector.detect(un_img, -1)
+
+        if (len(tag_list) == 0 or debug_level >= 1) and os.path.exists(result_dir):
+            cv2.imwrite(f"{result_dir}/color.png", un_img)
+        # end if
 
         if len(tag_list) == 0:
             msg = "no tag detected"
@@ -792,9 +801,10 @@ class TagMatcher3D:
             (Tuple[np.ndarray, str]): 细化后的从标签到相机的变换矩阵,返回的消息
         """
 
+        result_dir = f"{self.debug_dir}/track"
+
         # 创建保存跟踪结果的目录
-        if debug_level >= 1 and self.debug_dir is not None:
-            result_dir = f"{self.debug_dir}/track"
+        if self.debug_dir is not None and not os.path.exists(result_dir):
             os.makedirs(result_dir, exist_ok=True)
             logging.info(f"track results will be saved to: {result_dir}")
         # end if
@@ -837,6 +847,13 @@ class TagMatcher3D:
         # 根据投影的最小外接矩形裁剪图像
         crop_bgr_img = un_img[int(min_y):int(max_y), int(min_x):int(max_x)]
         tag_list = self.detector.detect(crop_bgr_img, -1)
+
+        if (len(tag_list) == 0 or debug_level >= 1) and os.path.exists(result_dir):
+            vis_img = un_img.copy()
+            cv2.rectangle(vis_img, (int(min_x), int(min_y)), (int(max_x), int(max_y)),
+                          color=(0, 0, 255), thickness=1)
+            cv2.imwrite(f"{result_dir}/proj_area.png", vis_img)
+        # end if
 
         if len(tag_list) == 0:
             msg = "no tag detected in cropped image"

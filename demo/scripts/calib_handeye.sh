@@ -11,16 +11,16 @@ echo
 ############################################## 参数配置 ##############################################
 
 # 相机内参文件路径
-cam_param_path="${root_dir}/demo/data/calib/cam_params.json"  
+cam_param_path="${root_dir}/demo/data/calib/g305/cam_params.json"  
 
 # 标定板信息: [tag_size( m ), space_size( m ), tag_rows, tag_cols]
 calib_board_info='[0.0352, 0.01056, 6, 6]'  
 
 # 图像目录
-img_dir="${root_dir}/demo/data/collect/calib_handeye/cam0" 
+img_dir="${root_dir}/demo/data/collect/g305/calib_handeye/cam0" 
 
 # 机械臂末端位姿文件路径
-arm_pose_path="${root_dir}/demo/data/collect/calib_handeye/arm_pose.json"  
+arm_pose_path="${root_dir}/demo/data/collect/g305/calib_handeye/arm_pose.json"  
 
 
 ############################################## 可执行程序 ##############################################

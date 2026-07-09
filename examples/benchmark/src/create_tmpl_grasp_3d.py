@@ -25,7 +25,7 @@ sys.path.append(root_dir)
 
 from core.utils import (
     GREEN, YELLOW, BLUE, RED, RESET,
-    KeyboardReader, read_handeye_calib, read_rgbd_params
+    KeyboardReader, read_calib_handeye, read_rgbd_params
 )
 from core.arm_wrapper import ArmWrapper
 from core.arm_utils import compute_axis_aligned_pose
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     parser.add_argument("--cam_params_path", type=str, required=True,
                         help="相机参数文件的路径, 包含内参和畸变参数")
 
-    parser.add_argument("--handeye_calib_path", type=str, required=True,
+    parser.add_argument("--calib_handeye_path", type=str, required=True,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
 
     parser.add_argument("--color_img_topic", type=str, required=True,
@@ -63,7 +63,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cam_params_path = args.cam_params_path
-    handeye_calib_path = args.handeye_calib_path
+    calib_handeye_path = args.calib_handeye_path
 
     color_img_topic = args.color_img_topic
     if color_img_topic is None:
@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
     print()
     print(f"RGB-D camera parameters file: {BLUE}{cam_params_path}{RESET}")
-    print(f"handeye calib file: {BLUE}{handeye_calib_path}{RESET}")
+    print(f"handeye calib file: {BLUE}{calib_handeye_path}{RESET}")
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
     print(f"depth image topic: {BLUE}{depth_img_topic}{RESET}")
     print(f'grasp template will be saved to: {BLUE}{tmpl_dir}{RESET}')
@@ -107,7 +107,7 @@ if __name__ == '__main__':
 
     # 读取手眼标定矩阵
     print()
-    T_end_cam, _ = read_handeye_calib(handeye_calib_path)
+    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
     if T_end_cam is None:
         logging.error('read handeye calib failed, exiting')
         exit(1)

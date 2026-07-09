@@ -1,0 +1,27 @@
+{
+    "camera_type": "Pinhole",
+    "IntrinsicFormat": "fx,fy,cx,cy",
+    "DistortionFormat": "k1,k2,p1,p2,k3,k4,k5,k6",
+    "serial_number": "CV2TC510005Z",
+    "resolution": [
+        640,
+        480
+    ],
+    "intrinsic": [
+        369.8008117675781,
+        369.6322326660156,
+        320.2730712890625,
+        241.5884552001953
+    ],
+    "distortion": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+    ],
+    "depth_scale": 0.0002
+}

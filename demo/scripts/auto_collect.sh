@@ -12,31 +12,62 @@ echo "项目根目录: $root_dir"
 echo
 
 
-############################################## 参数配置 ##############################################
+# ############################################## D405 参数配置 ##############################################
 
-### 采集标定手眼的数据时,使用下面的参数配置
-# 相机图像话题列表
-img_topic_list=(
-    "/realsense/d405/color/image_rect_raw"
-    "/realsense/d405/aligned_depth_to_color/image_raw"
-)
+# ### 1. 采集标定相机的数据时,使用下面的参数配置
+# # # 相机图像话题列表
+# # img_topic_list=(
+# #     "/realsense/d405/color/image_rect_raw"
+# # )
 
-# 机械臂动作模板文件夹路径
-tmpl_dir="${root_dir}/demo/data/action/calib_handeye"
-# 数据保存路径
-data_dir="${root_dir}/demo/data/collect/calib_handeye"
+# # # 机械臂动作模板文件夹路径
+# # tmpl_dir="${root_dir}/demo/data/action/calib_camera"
 
+# # # 数据保存路径
+# # data_dir="${root_dir}/demo/data/collect/d405/calib_camera"
 
-### 采集标定相机的数据时,使用下面的参数配置
+# ### 2. 采集标定手眼的数据时,使用下面的参数配置
 # # 相机图像话题列表
 # img_topic_list=(
 #     "/realsense/d405/color/image_rect_raw"
+#     "/realsense/d405/aligned_depth_to_color/image_raw"
+# )
+
+# # 机械臂动作模板文件夹路径
+# tmpl_dir="${root_dir}/demo/data/action/calib_handeye"
+
+# # 数据保存路径
+# data_dir="${root_dir}/demo/data/collect/d405/calib_handeye"
+
+
+
+############################################## G305 参数配置 ##############################################
+
+# ### 1. 采集标定相机的数据时,使用下面的参数配置
+# # 相机图像话题列表
+# img_topic_list=(
+#     /gemini305/color/image_raw
 # )
 
 # # 机械臂动作模板文件夹路径
 # tmpl_dir="${root_dir}/demo/data/action/calib_camera"
+
 # # 数据保存路径
-# data_dir="${root_dir}/demo/data/collect/calib_camera"
+# data_dir="${root_dir}/demo/data/collect/g305/calib_camera"
+
+
+### 2. 采集标定手眼的数据时,使用下面的参数配置
+# 相机图像话题列表
+img_topic_list=(
+    /gemini305/color/image_raw
+    /gemini305/depth/image_raw
+)
+
+# 机械臂动作模板文件夹路径
+tmpl_dir="${root_dir}/demo/data/action/calib_handeye"
+
+# 数据保存路径
+data_dir="${root_dir}/demo/data/collect/g305/calib_handeye"
 
 
 ############################################## 可执行程序 ##############################################

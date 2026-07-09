@@ -16,13 +16,13 @@ echo
 ############################################## 参数配置 ##############################################
 
 # RGB-D 相机内参文件路径
-cam_params_path="${root_dir}/demo/data/calib/cam_params.json"
+cam_params_path="${root_dir}/demo/data/calib/d405/d405_params.json"
 
 # 机械臂手眼标定结果文件路径
-handeye_calib_path="${root_dir}/demo/data/calib/calib_handeye.json"
+calib_handeye_path="${root_dir}/demo/data/calib/d405/calib_handeye.json"
 
 # 夹爪参数文件路径( 输入输出 )
-gripper_path="${root_dir}/demo/data/calib/gripper_body.json"
+gripper_path="${root_dir}/demo/data/calib/d405/gripper_body.json"
 
 # 彩色图像话题名称
 color_img_topic="/realsense/d405/color/image_rect_raw"
@@ -41,7 +41,7 @@ gripper_size='[0.015,0.005]'
 
 python3 ${root_dir}/examples/common/src/calib_gripper.py \
     --cam_params_path "${cam_params_path}" \
-    --handeye_calib_path "${handeye_calib_path}" \
+    --calib_handeye_path "${calib_handeye_path}" \
     --gripper_path "${gripper_path}" \
     --color_img_topic "${color_img_topic}" \
     --depth_img_topic "${depth_img_topic}" \
