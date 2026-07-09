@@ -21,10 +21,10 @@
 
 | 物料 | 说明 | 图例 |
 |------|------|------|
-| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="200"><br/><img src="docs/real_calib_board.jpg" width="200"><br/>左：打印用原图 ｜ 右：实拍 |
-| **夹爪标定工具** | 中心贴有 AprilTag（ID=0）的平板，用于标定夹爪→相机位姿 | <img src="docs/real_obj_calib_gripper0.jpg" width="200"> |
-| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="200"><br/><img src="docs/real_obj_tag.jpg" width="200"><br/>左：打印用原图 ｜ 右：实拍 |
-| **相机支架** | 确保相机 Z 轴与末端 Z 轴夹角 < 45° | <img src="docs/cam_bracket.jpg" width="200"> |
+| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="400"><br/><img src="docs/real_calib_board.jpg" width="400"><br/>左：打印用原图 ｜ 右：实拍 |
+| **夹爪标定工具** | 中心贴有 AprilTag（ID=0）的平板，用于标定夹爪→相机位姿 | <img src="docs/real_obj_calib_gripper0.jpg" width="400"> |
+| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="400"><br/><img src="docs/real_obj_tag.jpg" width="400"><br/>左：打印用原图 ｜ 右：实拍 |
+| **相机支架** | 将相机固定在机械臂末端，确保相机 Z 轴与末端 Z 轴夹角 < 45° | <img src="docs/cam_bracket.jpg" width="400"> |
 
 ---
 ## 依赖
@@ -50,8 +50,7 @@ pip install numpy==1.24.4 opencv-python==4.7.0.72 open3d==0.19.0 mmengine transf
 pip install carm==0.1.20260706
 ```
 
-> `apriltag2` 的安装方式取决于你的环境，请按各项目说明配置。
-> `examples/*/scripts/*.sh` 默认同时写了 Foxy / Humble 的 `source` 语句，按需注释。
+> `apriltag2` 的安装方式取决于你的环境，请按项目的README.md说明配置。
 
 ---
 
@@ -141,7 +140,7 @@ flowchart TD
 
 #### 2D 抓取（3 自由度：$x, y, \theta$）
 
-适用于物体放置在水平面上、仅需平面定位的场景（目前不允许视野里有多个贴了 apriltag 的物体）。
+适用于物体放置在水平面上、仅需平面定位的场景（目前不允许视野里存在多个贴了 apriltag 的物体）。
 
 <p align="center"><img src="docs/grasp_2d.gif" height="480"></p>
 
