@@ -1,6 +1,21 @@
 # carm_grasp
 
-基于 CARM 机械臂、ROS2 和 RGB-D 相机的抓取示例工程，覆盖机械臂控制、相机与手眼标定、夹爪标定、动作模板录制回放，以及基于 AprilTag 的 2D / 3D 视觉伺服抓取示例。
+基于 CARM 机械臂、ROS2 和 RGB-D 相机的抓取示例工程，覆盖机械臂控制、相机与手眼标定、夹爪标定、动作模板录制回放，以及基于 AprilTag 的 2D / 3D 抓取示例。
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><img src="docs/grasp_2d.gif" height="480"></td>
+      <td width="40"></td>
+      <td align="center"><img src="docs/grasp_3d.gif" height="480"></td>
+    </tr>
+    <tr>
+      <td align="center"><sub>2D抓取</sub></td>
+      <td></td>
+      <td align="center"><sub>3D抓取</sub></td>
+    </tr>
+  </table>
+</div>
 
 > **注意：**
 > - 当前 2D / 3D 抓取示例都假设目标表面可稳定检测到 AprilTag。
@@ -21,10 +36,75 @@
 
 | 物料 | 说明 | 图例 |
 |------|------|------|
-| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="400"><br/><img src="docs/real_calib_board.jpg" width="400"><br/>左：打印用原图 ｜ 右：实拍 |
+| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="400"><br/><img src="docs/real_calib_board.jpg" width="400"><br/>上：原图（开发者可以直接用于打印） ｜ 右：实拍 |
 | **夹爪标定工具** | 中心贴有 AprilTag（ID=0）的平板，用于标定夹爪→相机位姿 | <img src="docs/real_obj_calib_gripper0.jpg" width="400"> |
-| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="400"><br/><img src="docs/real_obj_tag.jpg" width="400"><br/>左：打印用原图 ｜ 右：实拍 |
+| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="400"><br/><img src="docs/real_obj_tag.jpg" width="400"><br/>上：原图（开发者可以直接用于打印） ｜ 下：实拍 |
 | **相机支架** | 将相机固定在机械臂末端，确保相机 Z 轴与末端 Z 轴夹角 < 45° | <img src="docs/cam_bracket.jpg" width="400"> |
+
+---
+## 环境准备
+
+在运行任何脚本之前，请确保以下硬件和软件环境已就绪。
+
+### 1. 机械臂连接
+
+- 给 CARM 机械臂上电，确认机械臂与控制 PC 在同一局域网。
+- 默认 IP 地址为 `10.42.0.101`，可通过 `ping 10.42.0.101` 验证连通性。
+- 若 IP 不同，所有 Python 脚本中 `ArmWrapper` 的 `ip` 参数需对应修改。
+
+### 2. 相机驱动与话题验证
+
+根据你的相机型号启动对应驱动，确保 ROS2 话题正常发布：
+
+| 相机 | 彩色话题（参考） | 深度话题（参考） |
+|------|-----------------|-----------------|
+| Intel RealSense D405 | `/realsense/d405/color/image_rect_raw` | `/realsense/d405/aligned_depth_to_color/image_raw` |
+| Orbbec Gemini 305 | `/gemini305/color/image_raw` | `/gemini305/depth/image_raw` |
+
+> 实际话题名取决于你的驱动配置，请用 `ros2 topic list` 确认。
+
+验证步骤：
+```bash
+# 1. 确认 ROS2 环境已 source（Foxy 或 Humble 二选一）
+source /opt/ros/humble/setup.bash
+
+# 2. 查看话题列表，确认彩色/深度/CameraInfo( 可选 ) 话题存在
+ros2 topic list | grep -E "color|depth|camera_info"
+
+# 3. 用 rqt_image_view 预览图像，确认画面正常
+ros2 run rqt_image_view rqt_image_view
+```
+
+### 3. ROS_DOMAIN_ID 设置
+
+如果同一网络中有多台 ROS2 设备，需设置 `ROS_DOMAIN_ID` 隔离通信。所有 shell 脚本默认设为 `1`，请根据实际网络环境修改：
+
+```bash
+export ROS_DOMAIN_ID=1   # 0-101，确保所有设备一致
+```
+
+### 4. 相机安装要求
+
+- 相机通过支架固定于机械臂末端（eye-in-hand 配置）。
+- 确保相机 Z 轴与末端 Z 轴夹角 < 45°，以获得良好的深度观测角度。
+- 安装完毕后，相机相对于末端的位置不应再发生变化（否则需重新手眼标定）。
+
+### 5. 工作区布局建议
+
+```
+        ┌──────────────┐      ┌─────────────┐
+        │   机械臂基座   │-----│  [放置区]     │
+        └──────┬───────┘      └─────────────┘
+               │
+        ┌──────┴───────┐
+        │   操作区域    │
+        │              │
+        │  [抓取物体]   │
+        └──────────────┘
+```
+
+- 抓取物体和放置区域应在机械臂的工作空间内。
+- 标定时将标定板平放于操作区域，确保机械臂能到达标定板的多个视角。
 
 ---
 ## 依赖
@@ -87,49 +167,66 @@ carm_grasp/
 │       │   └── test_tmpl_grasp_3d.py    # 测试 3D 视觉伺服抓取
 │       └── scripts/               # 对应 shell 启动脚本
 │
-├── demo/                          # 开箱即用演示
+├── demo/                          # 开箱即用演示（预配置好的脚本 + 示例数据）
 │   ├── data/
 │   │   ├── action/                #   预录制动作模板（标定用 / 采集用）
 │   │   ├── calib/                 #   标定结果（D405 / G305 相机参数、手眼矩阵、夹爪模型）
-│   │   └── collect/               #   采集数据样例
-│   └── scripts/                   #   可直接运行的启动脚本
-│
-├── data/
-│   ├── action/                    # 动作模板数据
-│   └── calib/                     # 标定文件
+│   │   │                          #   ⚠ 仅供格式参考，实际使用需用自己的硬件重新标定
+│   │   ├── collect/               #   采集数据样例
+│   │   └── benchmark/             #   抓取模板样例（grasp_2d / grasp_3d）
+│   └── scripts/                   #   可直接运行的启动脚本（action_record、auto_collect、标定、测试）
 │
 ├── rviz/                          # RViz 配置文件
 ├── scripts/                       # 通用脚本（open_rviz.sh）
-├── results/                       # 调试/运行结果输出
-└── test/                          # 测试脚本
+└── results/                       # 调试/运行结果输出
 ```
 
 ---
 
 ## 工作流程
 
+> 每个标定任务的实际流程是：**录制轨迹 → 自动采集 → 执行标定**。相机标定和手眼标定需要分别录制不同的采集轨迹。
+
 ```mermaid
 flowchart TD
-    A["自动采集相机标定数据<br/>（如果已知相机内参，此步骤可省略）<br/>auto_collect.py"] --> B["相机标定<br/>（如果已知相机内参，此步骤可省略）<br/>calib_camera.py"]
-    B --> C["自动采集手眼标定数据<br/>（如果已知手眼标定参数，此步骤可省略）<br/>auto_collect.py"]
-    C --> D["手眼标定<br/>（如果已知手眼标定参数，此步骤可省略）<br/>calib_handeye.py"]
-    D --> E["夹爪标定<br/>（如果已知夹爪标定参数，此步骤可省略，此步骤仅3D抓取会用到）<br/>calib_gripper.py"]
-    E --> F{选择抓取模式}
-    F -->|2D| G["创建 2D 抓取模板<br/>create_tmpl_grasp_2d.py"]
-    F -->|3D| H["创建 3D 抓取模板<br/>create_tmpl_grasp_3d.py"]
-    G --> I["测试 2D 抓取<br/>test_tmpl_grasp_2d.py"]
-    H --> J["测试 3D 抓取<br/>test_tmpl_grasp_3d.py"]
+    subgraph camera_calib ["相机标定（可跳过，如果已知内参）"]
+        A1["① 录制相机标定采集轨迹<br/>action_record.py"] --> A2["② 自动采集标定板图像<br/>auto_collect.py"]
+        A2 --> A3["③ 相机内参标定<br/>calib_camera.py → cam_params.json"]
+    end
+    subgraph handeye_calib ["手眼标定（可跳过，如果已知手眼矩阵）"]
+        B1["④ 录制手眼标定采集轨迹<br/>action_record.py"] --> B2["⑤ 自动采集图像+位姿<br/>auto_collect.py"]
+        B2 --> B3["⑥ 手眼标定<br/>calib_handeye.py → calib_handeye.json"]
+    end
+    A3 --> B1
+    B3 --> C["⑦ 夹爪标定（仅 3D 抓取需要）<br/>calib_gripper.py → gripper_body.json"]
+    C --> D{选择抓取模式}
+    D -->|2D| E["⑧ 创建 2D 抓取模板<br/>create_tmpl_grasp_2d.py"]
+    D -->|3D| F["⑧ 创建 3D 抓取模板<br/>create_tmpl_grasp_3d.py"]
+    E --> G["⑨ 测试 2D 抓取<br/>test_tmpl_grasp_2d.py"]
+    F --> H["⑨ 测试 3D 抓取<br/>test_tmpl_grasp_3d.py"]
 ```
 
 ### 前置步骤（标定）
 
-**1. 相机内参标定** — 使用 `auto_collect.py` 采集标定板多视角图像，再用 `calib_camera.py` 标定针孔模型的内参和畸变系数，生成 `cam_params.json`。
+#### 相机内参标定（步骤 ① → ② → ③）
+
+1. **录制采集轨迹** — 运行 `action_record.py`，在拖动模式下将机械臂移动到标定板的不同视角，按 `s` 保存各姿态。需确保标定板在图像中占比适中、角度多样、覆盖视野的各个区域。保存的模板写入 `calib_camera` 目录。
+2. **自动采集图像** — 运行 `auto_collect.py`（相机标定配置），机械臂自动依次执行上一步录制的模板，在每个位姿采集彩色图像。
+3. **执行标定** — 运行 `calib_camera.py`，读取图像执行针孔模型标定，生成 `cam_params.json`。
 
 <p align="center"><img src="docs/auto_collect.gif" width="640"></p>
 
-**2. 手眼标定** — 眼在手（eye-in-hand）场景下，求解 $AX = XB$ 得到末端到相机的变换矩阵 $T_{end}^{cam}$。先用 `auto_collect.py` 采集末端位姿与对应图像，再用 `calib_handeye.py` 标定，生成 `calib_handeye.json`。
+> **标定板参数说明**：`calib_board_info` 格式为 `[tag_size, space_size, tag_rows, tag_cols]`，单位均为米。例如 `[0.0352, 0.01056, 6, 6]` 表示单个 tag 边长 35.2mm，tag 间距 10.56mm，共 6×6 个 tag。请根据你实际打印的标定板测量并替换。
 
-**3. 夹爪标定** — 使末端朝下，张开夹爪并对准夹爪上的 AprilTag（ID=0）平面，用 `calib_gripper.py` 采集 RGB-D 图像估计夹爪位姿，生成 `gripper_body.json`。
+#### 手眼标定（步骤 ④ → ⑤ → ⑥）
+
+1. **录制采集轨迹** — 再次运行 `action_record.py`，录制一组新的轨迹模板。注意：手眼标定的轨迹需要让标定板始终在视野内，且末端姿态变化足够丰富（平移 + 旋转），保存到 `calib_handeye` 目录。
+2. **自动采集** — 运行 `auto_collect.py`（手眼标定配置），同时采集彩色图、深度图和机械臂末端位姿。
+3. **执行标定** — 运行 `calib_handeye.py`，求解 $AX = XB$ 得到末端到相机的变换矩阵 $T_{end}^{cam}$，生成 `calib_handeye.json`。
+
+#### 夹爪标定（步骤 ⑦）
+
+使末端朝下，张开夹爪并对准夹爪上的 AprilTag（ID=0）平面，用 `calib_gripper.py` 采集 RGB-D 图像估计夹爪位姿，生成 `gripper_body.json`。
 
 <p align="center">
   <img src="docs/real_obj_calib_gripper1.jpg" height="300">
@@ -140,7 +237,7 @@ flowchart TD
 
 #### 2D 抓取（3 自由度：$x, y, \theta$）
 
-适用于物体放置在水平面上、仅需平面定位的场景（目前不允许视野里存在多个贴了 apriltag 的物体）。
+适用于物体放置在水平面（与机械臂基座的XOY平面平行）上、仅需平面定位的场景（目前不允许视野里仅允许存在一个贴了 apriltag 的物体）。
 
 <p align="center"><img src="docs/grasp_2d.gif" height="480"></p>
 
@@ -252,57 +349,138 @@ imgs = cam_node.get_frames()  # 获取一帧同步图像
 
 ## 快速开始
 
+> **说明**：`demo/` 目录提供了预配置的 shell 脚本和示例数据，适合快速体验。`examples/` 目录是参考实现源码。首次使用时，建议先阅读 `demo/scripts/*.sh` 中的参数配置，根据实际硬件修改话题名、`ROS_DOMAIN_ID` 等参数。
+
 ### 前置要求
 
-- 机械臂可通过 `carm` 正常连接（默认 IP：`10.42.0.101`）
-- ROS2 环境已配置，相机话题正常发布
-- 根据实际设备修改 `demo/scripts/*.sh` 中的话题名、`ROS_DOMAIN_ID`、`detect_pose` / `place_pose` 等参数
+- 已完成 [环境准备](#环境准备) 中的所有步骤。
+- 机械臂可通过 `carm` 正常连接（默认 IP：`10.42.0.101`）。
+- 相机驱动已启动，ROS2 话题正常发布（用 `ros2 topic list` 验证）。
+- 根据实际设备修改对应 `.sh` 中的话题名、`ROS_DOMAIN_ID`。
+- shell 脚本同时写了 `source /opt/ros/foxy/setup.bash` 和 `source /opt/ros/humble/setup.bash`，请**注释掉不需要的那一行**。
 
-### 标定流程
+---
 
-> 如果你已有标定文件，可直接跳到抓取流程。也可直接使用 `demo/data/calib/` 下的预置标定结果快速体验。
+### 完整操作步骤
+
+> 如果你已有标定文件，可直接跳到第 8 步。也可直接使用 `demo/data/calib/` 下的预置标定结果快速体验。
+
+#### 第一阶段：相机内参标定（步骤 ①–③）
 
 ```bash
 cd demo/scripts
 
-# 1. 录制采集动作模板（拖动机械臂到标定板不同视角，按 s 保存）
+# ① 录制相机标定用的采集轨迹
+#    修改 action_record.sh：将 tmpl_dir 指向 calib_camera 目录
+#    （拖动机械臂到标定板的不同视角，按 s 保存）
 ./action_record.sh
 
-# 2. 自动执行模板，采集图像与机械臂位姿
+# ② 自动采集标定板图像
+#    修改 auto_collect.sh：
+#      - 注释掉手眼标定的配置，启用相机标定的配置
+#      - 确认 img_topic_list 仅包含彩色话题
+#      - data_dir 指向 calib_camera 目录
 ./auto_collect.sh
 
-# 3. 相机内参标定 → 生成 cam_params.json
+# ③ 执行相机标定 → 生成 cam_params.json
+#    修改 calib_camera.sh：确认 calib_board_info 的 tag 尺寸与实际一致
 ./calib_camera.sh
-
-# 4. 手眼标定 → 生成 calib_handeye.json
-./calib_handeye.sh
-
-# 5. 夹爪标定 → 生成 gripper_body.json（仅 3D 抓取需要）
-./calib_gripper.sh
-
-# 6. 启动 RViz 检查标定结果与 TF 树
-../scripts/open_rviz.sh
 ```
 
-### 2D 抓取流程
+#### 第二阶段：手眼标定（步骤 ④–⑥）
 
 ```bash
 cd demo/scripts
 
-# 1. 录制 2D 抓取模板（需先完成相机标定与手眼标定）
-#    修改 test_tmpl_grasp_2d.sh 中的 detect_pose / place_pose
+# ④ 录制手眼标定用的采集轨迹
+#    修改 action_record.sh：将 tmpl_dir 指向 calib_handeye 目录
+#    （轨迹需要让标定板始终在视野内，末端姿态变化足够丰富）
+./action_record.sh
+
+# ⑤ 自动采集图像 + 机械臂位姿
+#    修改 auto_collect.sh：
+#      - 启用手眼标定的配置（彩色 + 深度话题）
+#      - data_dir 指向 calib_handeye 目录
+./auto_collect.sh
+
+# ⑥ 执行手眼标定 → 生成 calib_handeye.json
+#    修改 calib_handeye.sh：确认 cam_param_path 指向上一步生成的 cam_params.json
+./calib_handeye.sh
+```
+
+#### 第三阶段：夹爪标定（步骤 ⑦，仅 3D 抓取需要）
+
+```bash
+cd demo/scripts
+
+# ⑦ 夹爪标定 → 生成 gripper_body.json
+#    修改 calib_gripper.sh：确认话题名、cam_params_path、calib_handeye_path
+./calib_gripper.sh
+```
+
+#### 验证标定结果
+
+```bash
+# 启动 RViz 检查 TF 树和点云对齐情况
+../scripts/open_rviz.sh
+
+# 另开终端，启动机械臂状态发布节点（观察 arm_end→camera 的 TF）
+bash examples/common/scripts/arm_node.sh
+```
+
+> 在 RViz 中检查：
+> - TF 树中 `base_link → arm_end → camera_link` 的变换是否合理（相机应位于末端附近）。
+> - 点云与机械臂模型的相对位置是否一致。
+
+#### 第四阶段：2D 抓取（步骤 ⑧–⑨）
+
+```bash
+cd demo/scripts
+
+# ⑧ 创建 2D 抓取模板
+#    修改 create_tmpl_grasp_2d.sh：确认话题名、cam_params_path、tmpl_dir
+./create_tmpl_grasp_2d.sh
+#    交互录制：g→抓取位姿, n→near, b→next_near, f→far, d→next_far
+
+# ⑨ 测试 2D 抓取
+#    修改 test_tmpl_grasp_2d.sh：
+#      - 确认话题名、cam_params_path、calib_handeye_path、tmpl_dir
+#      - 填入 detect_pose 和 place_pose（获取方法见下文）
 ./test_tmpl_grasp_2d.sh
 ```
 
-### 3D 抓取流程
+#### 第四阶段：3D 抓取（步骤 ⑧–⑨）
 
 ```bash
 cd demo/scripts
 
-# 1. 录制 3D 抓取模板（需先完成相机标定、手眼标定和夹爪标定）
-#    修改 test_tmpl_grasp_3d.sh 中的 detect_pose / place_pose
+# ⑧ 创建 3D 抓取模板
+#    修改 create_tmpl_grasp_3d.sh：确认话题名、cam_params_path、calib_handeye_path、tmpl_dir
+./create_tmpl_grasp_3d.sh
+#    交互录制：g→抓取位姿, r→预备位姿（同时匹配 T_cam_model）
+
+# ⑨ 测试 3D 抓取
+#    修改 test_tmpl_grasp_3d.sh：
+#      - 确认话题名、cam_params_path、calib_handeye_path、gripper_path、tmpl_dir
+#      - 填入 detect_pose 和 place_pose
 ./test_tmpl_grasp_3d.sh
 ```
+
+---
+
+### 如何获取 detect_pose / place_pose
+
+这两个参数是机械臂末端在基座坐标系下的位姿 `[tx, ty, tz, qx, qy, qz, qw]`，需要根据实际工位设置。获取方法：
+
+1. **启动 arm_node**（在另一个终端）：
+   ```bash
+   bash examples/common/scripts/arm_node.sh
+   ```
+2. **拖动机械臂**到检测位置（能看到目标物体的安全高度），按 `v` 键打印当前末端位姿。
+3. **复制终端输出**的位姿数组，填入 `test_tmpl_grasp_*.sh` 的 `detect_pose` 变量。
+4. 同理，拖动到放置位置，获取 `place_pose`。
+
+---
 
 ### 动作录制与回放
 
@@ -311,12 +489,23 @@ cd demo/scripts
 ./action_play.sh      # 回放动作模板
 ```
 
+---
+
 ### 常见问题
 
-- 抓取位姿明显不对 → 优先检查 `calib_handeye.json`、`cam_params.json` 和话题配置
-- 2D / 3D 抓取脚本均依赖手眼标定结果；3D 抓取额外依赖 `gripper_body.json`
-- shell 脚本默认兼容 Foxy / Humble，按需注释对应 `source` 行
-- `demo/data/` 下预置了标定结果和动作模板，可开箱即用
+| 问题 | 排查方向 |
+|------|----------|
+| 抓取位姿明显不对 | 优先检查 `calib_handeye.json`、`cam_params.json` 和话题配置是否与当前相机匹配 |
+| AprilTag 检测不到 | 检查光照是否均匀、tag 与相机平面夹角是否 < 60°、tag 在图像中像素尺寸是否 > 20px |
+| 相机标定重投影误差过大（> 1px） | 增加有效图像数量（≥15 张）、确保标定板覆盖视野各区域、避免运动模糊 |
+| 手眼标定结果异常 | 检查 `arm_pose.json` 中图片编号与图像文件名是否对齐、确认 `eye_in_hand=true` |
+| 深度图全黑或噪声大 | 检查深度话题名是否正确、物体是否在相机有效深度范围内（D405: ~7cm–50cm） |
+| 夹爪标定位置偏差 | 确保 AprilTag（ID=0）平面平整、深度图质量良好、夹爪实际尺寸与 `gripper_size` 一致 |
+| `./xxx.sh: No such file or directory` | 创建模板脚本在 `examples/benchmark/scripts/`，测试脚本在 `demo/scripts/`，注意区分 |
+| 2D / 3D 抓取脚本均依赖手眼标定结果 | 3D 抓取额外依赖 `gripper_body.json`，请确保所有依赖文件路径正确 |
+| shell 脚本 ROS2 环境报错 | 确认已注释掉不适用的 ROS2 版本（Foxy 或 Humble 只保留一个 `source` 行） |
+| 机械臂连接失败 | `ping 10.42.0.101` 检查网络、确认机械臂已上电、检查防火墙设置 |
+| `demo/data/` 下的预置标定结果不可用 | 预置数据仅供格式参考，实际使用时必须用你自己的硬件重新标定 |
 
 ---
 
@@ -467,6 +656,11 @@ bash examples/common/scripts/auto_collect.sh
 
 - 在 `img_dir` 的父目录下生成 `cam_params.json`。
 
+质量判断：
+
+- 终端会输出每张图像的重投影误差（reprojection error），一般 **< 0.5 px** 为优秀，**< 1.0 px** 可接受。
+- 若误差过大，检查标定板参数是否与实物一致、图像是否清晰、标定板是否覆盖了视野的各个区域。
+
 运行方式：
 
 ```bash
@@ -492,6 +686,11 @@ bash examples/common/scripts/calib_camera.sh
 输出内容：
 
 - 在 `arm_pose.json` 同目录下生成 `calib_handeye.json`。
+
+质量判断：
+
+- 终端会输出手眼标定的平移向量和旋转矩阵，平移量应接近实际相机安装位置（通常在 5–15 cm 量级）。
+- 建议在 RViz 中验证：启动 `arm_node.sh` + RViz，检查 `base_link → arm_end → camera_link` 的 TF 变换是否合理。
 
 运行方式：
 
