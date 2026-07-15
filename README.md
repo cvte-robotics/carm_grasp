@@ -36,9 +36,9 @@
 
 | 物料 | 说明 | 图例 |
 |------|------|------|
-| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定 | <img src="docs/calib_board.png" width="400"><br/><img src="docs/real_calib_board.jpg" width="400"><br/>上：原图（开发者可以直接用于打印） ｜ 右：实拍 |
-| **夹爪标定工具** | 中心贴有 AprilTag（ID=0）的平板，用于标定夹爪→相机位姿 | <img src="docs/real_obj_calib_gripper0.jpg" width="400"> |
-| **抓取物体** | 贴有 AprilTag（ID=0）的方块（4×4 cm），用于抓取演示 | <img src="docs/apriltag0.png" width="400"><br/><img src="docs/real_obj_tag.jpg" width="400"><br/>上：原图（开发者可以直接用于打印） ｜ 下：实拍 |
+| **标定板** | AprilTag 标定板（≥4 个 tag，推荐 6×6），用于相机内参标定和手眼标定<br/>图片路径：`docs/calib_board.png` | <img src="docs/real_calib_board.jpg" width="400"> |
+| **夹爪标定工具** | 中心贴有 AprilTag（ID=0）（4×4 cm）的平板，用于标定夹爪→相机位姿<br/>3D打印文件路径：`docs/obj_calib_gripper.stl`<br/>图片路径：`docs/apriltag0.png` | <img src="docs/real_obj_calib_gripper0.jpg" width="400"> |
+| **抓取物体** | 贴有 AprilTag（ID=0）（4.5×4.5 cm）的方块，用于抓取演示<br/>3D打印文件路径：`docs/obj_with_apriltag.stl`<br/>图片路径：`docs/apriltag0.png` | <img src="docs/real_obj_tag.jpg" width="400">
 | **相机支架** | 将相机固定在机械臂末端，确保相机 Z 轴与末端 Z 轴夹角 < 45° | <img src="docs/cam_bracket.jpg" width="400"> |
 
 ---
