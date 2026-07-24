@@ -45,13 +45,15 @@ class ArmWrapper:
     def __init__(self,
                  ip: str = "10.42.0.101",
                  control_mode: int = ControlMode.POSITION,
-                 speed_level: int = 50) -> None:
+                 speed_level: int = 50,
+                 arm_index: int = 0) -> None:
         """
         构造函数    
         Args:
             ip (str): 机械臂的 IP 地址
             control_mode (int): 机械臂的控制模式, 0: 空闲模式, 1: 位置控制模式, 2: MIT 模式, 3: 拖动模式, 4: PF 模式
             speed_level (int): 机械臂的速度等级, 范围为 1~100, 数值越大速度越快
+            arm_index (int): 机械臂的索引号, 用于区分多机械臂, 默认值为 0
         """
 
         self.init_speed_level = speed_level
@@ -65,14 +67,16 @@ class ArmWrapper:
         # end if
 
         # 初始化 CARM
-        self.arm = carm.Carm(ip)
+        self.arm = carm.Carm(addr=ip, arm_index=arm_index)
 
         self.arm.set_ready()  # 使能机械臂
         self.arm.set_control_mode(control_mode)  # 设置机械臂控制模式
         self.set_speed_level(speed_level)
 
-        self.init_joints = [0, 0, 0, 0, 0, 0]
+        self.init_joints = [0] * len(self.get_joints())
         """机械臂的初始关节角度"""
+        
+        logging.info(f'{GREEN}Arm has {len(self.init_joints)} joints.{RESET}')
 
         logging.info(f'{GREEN}Arm initialized.{RESET}')
     # end def __init__
@@ -138,10 +142,10 @@ class ArmWrapper:
         """
         获取机械臂的关节角度
         Returns:
-            (List[float]): 机械臂的关节角度列表,长度为6
+            (List[float]): 机械臂的关节角度列表
         """
 
-        joints = [float(v) for v in self.arm.joint_pos]  # 返回值为 List[float], 长度为6
+        joints = [float(v) for v in self.arm.joint_pos]  # 返回值为 List[float]
 
         return joints
     # end def get_joints
@@ -190,14 +194,14 @@ class ArmWrapper:
         """
         设置机械臂的关节角度     
         Args:
-            target_joints (List[float]): 目标机械臂的关节角度列表,长度为 6
+            target_joints (List[float]): 目标机械臂的关节角度列表
             desire_time (float): 期望的运动时间, 单位( 秒 ), 默认值为-1表示使用机械臂默认速度, 当 move_line=True 时, 该参数会被忽略
             move_line (bool): 是否进行直线运动, 默认值为 False
         Returns:
             (bool): 设置是否成功
         """
 
-        assert len(target_joints) == 6, "Joint angles must be a list of 6 elements."
+        assert len(target_joints) == len(self.init_joints), f"Joint angles must be a list of {len(self.init_joints)} elements."
 
         if move_line:
             is_ok = self.arm.move_line_joint(target_joints)

@@ -26,7 +26,7 @@
 
 | 硬件 | 说明 |
 |------|------|
-| **CARM 机械臂** | 自研六轴机械臂，支持 Position / MIT / TEACH / PF 控制模式 |
+| **CARM 机械臂** | 自研多轴机械臂（关节数动态获取），支持 Position / MIT / TEACH / PF 控制模式，支持多机械臂系统（通过 `arm_index` 区分） |
 | **Intel RealSense D405** | RGB-D 相机（眼在手），彩色 + 深度对齐 |
 | **Orbbec Gemini 305** | RGB-D 相机（眼在手），彩色 + 深度对齐 |
 
@@ -112,7 +112,7 @@ export ROS_DOMAIN_ID=1   # 0-101，确保所有设备一致
 | 组件 | 版本 | 用途 |
 |------|------|------|
 | [apriltag2](https://github.com/cvte-robotics/apriltag2) | — | AprilTag 检测与位姿估计 |
-| [carm](https://pypi.org/project/carm/) | ≥ 0.1.20260706 | CARM 机械臂 Python SDK |
+| [carm](https://pypi.org/project/carm/) | — | CARM 机械臂 Python SDK |
 | ROS2 (Foxy / Humble) | — | `rclpy`、`cv_bridge`、`message_filters`、`tf2_ros` |
 | numpy | 1.24.4 | 数值计算 |
 | opencv-python | 4.7.0.72 | 图像处理、相机标定、手眼标定 |
@@ -127,10 +127,10 @@ export ROS_DOMAIN_ID=1   # 0-101，确保所有设备一致
 pip install numpy==1.24.4 opencv-python==4.7.0.72 open3d==0.19.0 mmengine transforms3d
 
 # CARM SDK
-pip install carm==0.1.20260706
+pip install carm
 ```
 
-> `apriltag2` 的安装方式取决于你的环境，请按项目的README.md说明配置。
+> `apriltag2` 的安装方式取决于你的环境，请按项目的 README.md 说明配置。
 
 ---
 
@@ -156,6 +156,7 @@ carm_grasp/
 │   │   │   ├── calib_camera.py    #   相机内参标定（基于 AprilTag 标定板）
 │   │   │   ├── calib_gripper.py   #   夹爪标定（夹爪→相机位姿）
 │   │   │   ├── calib_handeye.py   #   手眼标定（AX=XB）
+│   │   │   ├── verify_handeye.py  #   手眼标定验证工具
 │   │   │   └── create_collect_actions.py  # 自动生成采集动作模板（半球面采样）
 │   │   └── scripts/               # 对应 shell 启动脚本
 │   │
@@ -198,12 +199,13 @@ flowchart TD
         B2 --> B3["⑥ 手眼标定<br/>calib_handeye.py → calib_handeye.json"]
     end
     A3 --> B1
-    B3 --> C["⑦ 夹爪标定（仅 3D 抓取需要）<br/>calib_gripper.py → gripper_body.json"]
+    B3 --> V["⑦ 验证手眼标定（可选）<br/>verify_handeye.py"]
+    V --> C["⑧ 夹爪标定（仅 3D 抓取需要）<br/>calib_gripper.py → gripper_body.json"]
     C --> D{选择抓取模式}
-    D -->|2D| E["⑧ 创建 2D 抓取模板<br/>create_tmpl_grasp_2d.py"]
-    D -->|3D| F["⑧ 创建 3D 抓取模板<br/>create_tmpl_grasp_3d.py"]
-    E --> G["⑨ 测试 2D 抓取<br/>test_tmpl_grasp_2d.py"]
-    F --> H["⑨ 测试 3D 抓取<br/>test_tmpl_grasp_3d.py"]
+    D -->|2D| E["⑨ 创建 2D 抓取模板<br/>create_tmpl_grasp_2d.py"]
+    D -->|3D| F["⑨ 创建 3D 抓取模板<br/>create_tmpl_grasp_3d.py"]
+    E --> G["⑩ 测试 2D 抓取<br/>test_tmpl_grasp_2d.py"]
+    F --> H["⑩ 测试 3D 抓取<br/>test_tmpl_grasp_3d.py"]
 ```
 
 ### 前置步骤（标定）
@@ -224,7 +226,17 @@ flowchart TD
 2. **自动采集** — 运行 `auto_collect.py`（手眼标定配置），同时采集彩色图、深度图和机械臂末端位姿。
 3. **执行标定** — 运行 `calib_handeye.py`，求解 $AX = XB$ 得到末端到相机的变换矩阵 $T_{end}^{cam}$，生成 `calib_handeye.json`。
 
-#### 夹爪标定（步骤 ⑦）
+#### 手眼标定验证（步骤 ⑦，可选）
+
+使用 `verify_handeye.py` 验证手眼标定结果 $T_{end}^{cam}$ 的准确性。支持两种模式：
+- **录制模式** (`--record`)：在当前相机视角下定位标定板，将 $T_{cam}^{board}$ 保存为模板文件。
+- **验证模式**（默认）：加载已录制的模板，循环执行「定位标定板 → 计算目标位姿 → 移动机械臂」的流程，观察末端是否准确抵达标定板上的预期位置。
+
+```bash
+bash examples/common/scripts/verify_handeye.sh
+```
+
+#### 夹爪标定（步骤 ⑧）
 
 使末端朝下，张开夹爪并对准夹爪上的 AprilTag（ID=0）平面，用 `calib_gripper.py` 采集 RGB-D 图像估计夹爪位姿，生成 `gripper_body.json`。
 
@@ -284,13 +296,13 @@ CARm 机械臂 SDK 的统一封装类。
 ```python
 from core.arm_wrapper import ArmWrapper
 
-arm = ArmWrapper(ip="10.42.0.101", control_mode=ArmWrapper.ControlMode.POSITION, speed_level=50)
+arm = ArmWrapper(ip="10.42.0.101", control_mode=ArmWrapper.ControlMode.POSITION, speed_level=50, arm_index=0)
 
 # 控制模式
 arm.set_control_mode(ArmWrapper.ControlMode.PF)   # POSITION / MIT / TEACH / PF
 
 # 运动控制
-arm.set_joints([0, 0, 0, 0, 0, 0])                 # 关节角控制
+arm.set_joints(arm.init_joints)                    # 关节角控制（关节数动态获取）
 arm.set_pose(T_base_end)                           # 末端位姿控制 (4×4)
 arm.set_gripper_dist(0.05)                         # 夹爪开度 (m)
 
@@ -313,7 +325,6 @@ arm.set_speed_level(80)                            # 速度 1-100
 ```python
 cam_node = CamNode(
     img_topic_list=["/color/image_raw", "/depth/image_raw"],
-    cam_info_topic_list=["/color/camera_info"],
     reliability=1  # 0=SYSTEM_DEFAULT, 1=RELIABLE, 2=BEST_EFFORT
 )
 imgs = cam_node.get_frames()  # 获取一帧同步图像
@@ -363,7 +374,7 @@ imgs = cam_node.get_frames()  # 获取一帧同步图像
 
 ### 完整操作步骤
 
-> 如果你已有标定文件，可直接跳到第 8 步。也可直接使用 `demo/data/calib/` 下的预置标定结果快速体验。
+> 如果你已有标定文件，可直接跳到第 9 步。也可直接使用 `demo/data/calib/` 下的预置标定结果快速体验。
 
 #### 第一阶段：相机内参标定（步骤 ①–③）
 
@@ -408,12 +419,22 @@ cd demo/scripts
 ./calib_handeye.sh
 ```
 
-#### 第三阶段：夹爪标定（步骤 ⑦，仅 3D 抓取需要）
+#### 验证手眼标定（步骤 ⑦，可选）
+
+```bash
+# ⑦ 验证手眼标定结果
+#    修改 verify_handeye.sh：确认 cam_params_path、calib_handeye_path、tmpl_path 等参数
+bash examples/common/scripts/verify_handeye.sh
+```
+
+> 验证模式会驱动机械臂移动到使相机观测与模板一致的目标位姿，观察末端是否准确抵达标定板上的预期位置，以检验手眼标定精度。
+
+#### 第三阶段：夹爪标定（步骤 ⑧，仅 3D 抓取需要）
 
 ```bash
 cd demo/scripts
 
-# ⑦ 夹爪标定 → 生成 gripper_body.json
+# ⑧ 夹爪标定 → 生成 gripper_body.json
 #    修改 calib_gripper.sh：确认话题名、cam_params_path、calib_handeye_path
 ./calib_gripper.sh
 ```
@@ -432,34 +453,34 @@ bash examples/common/scripts/arm_node.sh
 > - TF 树中 `base_link → arm_end → camera_link` 的变换是否合理（相机应位于末端附近）。
 > - 点云与机械臂模型的相对位置是否一致。
 
-#### 第四阶段：2D 抓取（步骤 ⑧–⑨）
+#### 第四阶段：2D 抓取（步骤 ⑨–⑩）
 
 ```bash
 cd demo/scripts
 
-# ⑧ 创建 2D 抓取模板
+# ⑨ 创建 2D 抓取模板
 #    修改 create_tmpl_grasp_2d.sh：确认话题名、cam_params_path、tmpl_dir
 ./create_tmpl_grasp_2d.sh
 #    交互录制：g→抓取位姿, n→near, b→next_near, f→far, d→next_far
 
-# ⑨ 测试 2D 抓取
+# ⑩ 测试 2D 抓取
 #    修改 test_tmpl_grasp_2d.sh：
 #      - 确认话题名、cam_params_path、calib_handeye_path、tmpl_dir
 #      - 填入 detect_pose 和 place_pose（获取方法见下文）
 ./test_tmpl_grasp_2d.sh
 ```
 
-#### 第四阶段：3D 抓取（步骤 ⑧–⑨）
+#### 第四阶段：3D 抓取（步骤 ⑨–⑩）
 
 ```bash
 cd demo/scripts
 
-# ⑧ 创建 3D 抓取模板
+# ⑨ 创建 3D 抓取模板
 #    修改 create_tmpl_grasp_3d.sh：确认话题名、cam_params_path、calib_handeye_path、tmpl_dir
 ./create_tmpl_grasp_3d.sh
 #    交互录制：g→抓取位姿, r→预备位姿（同时匹配 T_cam_model）
 
-# ⑨ 测试 3D 抓取
+# ⑩ 测试 3D 抓取
 #    修改 test_tmpl_grasp_3d.sh：
 #      - 确认话题名、cam_params_path、calib_handeye_path、gripper_path、tmpl_dir
 #      - 填入 detect_pose 和 place_pose
@@ -523,22 +544,20 @@ MIT License — 详见 [LICENSE](./LICENSE)。
 
 用途：持续发布机械臂位姿、关节角、夹爪 Marker，以及从 `frame_id` 到 `pc_frame_id` 的 TF，方便在 RViz 中观察状态。
 
-依赖：
-
-- `data/calib/calib_handeye.json`
-- `data/calib/gripper_body.json`
-
 主要参数：
 
-- `--frame_id`：机械臂基座坐标系名称。
-- `--pc_frame_id`：相机点云坐标系名称。
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
+- `--calib_handeye_path`：手眼标定文件路径（可选，不提供则不发布夹爪 Marker 和相机 TF）。
+- `--gripper_path`：夹爪标定文件路径（可选，不提供则不发布夹爪 Marker）。
+- `--frame_id`：机械臂基座坐标系名称（可选，默认 `base_link`）。
+- `--pc_frame_id`：相机点云坐标系名称（可选，不提供则不发布相机 TF）。
 
 交互按键：
 
 - `q`：退出。
 - `v`：打印当前关节角、末端位姿和夹爪距离。
 - `a`：对齐末端 Z 轴到基座 -Z 方向。
-- `c`：对齐相机 Z 轴到基座 -Z 方向。
+- `c`：对齐相机 Z 轴到基座 -Z 方向（需要提供 `calib_handeye_path`）。
 - `,` / `.`：缩小 / 放大夹爪开口。
 
 运行方式：
@@ -557,6 +576,7 @@ bash examples/common/scripts/arm_node.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--tmpl_dir`：模板保存目录。
 
 交互按键：
@@ -589,6 +609,7 @@ bash examples/common/scripts/action_record.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--tmpl_dir`：模板目录。
 - `--debug`：开启后，每个模板执行前都会等待确认。
 
@@ -612,6 +633,7 @@ bash examples/common/scripts/action_play.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--tmpl_dir`：动作模板目录（通常由 `action_record.py` 录制生成）。
 - `--img_topic_list`：需要采集的图像话题列表，可传入多路图像（如彩色+深度）。
 - `--data_dir`：结果保存目录。
@@ -667,6 +689,53 @@ bash examples/common/scripts/auto_collect.sh
 bash examples/common/scripts/calib_camera.sh
 ```
 
+#### create_collect_actions.py
+
+用途：自动生成用于 `auto_collect.py` 的机械臂动作模板。核心思路是在以 `target_point` 为球心、指定半径的半球面上采样相机位姿（相机 Z 轴始终指向目标点），通过手眼标定矩阵 $T_{end}^{cam}$ 将相机位姿转换为机械臂末端位姿，再利用逆运动学过滤不可达位姿，最终保存为 action 模板 JSON。可选使用 Open3D 可视化所有可达末端位姿和对应相机视线。
+
+> **典型工作流**：`create_collect_actions.py`（自动生成采集模板）→ `auto_collect.py`（自动采集数据）→ `calib_handeye.py` / `calib_camera.py`（执行标定）
+
+依赖：
+
+- `data/calib/calib_handeye.json`（手眼标定结果，用于将相机位姿转换为末端位姿）
+
+主要参数：
+
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
+- `--calib_handeye_path`：手眼标定文件路径（必须包含 $T_{end}^{cam}$，eye-in-hand）。
+- `--tmpl_dir`：保存 action 模板 JSON 的目录。
+- `--target_point`：基座坐标系下相机需要指向的点 `[x, y, z]`，默认 `[0.3, 0, 0]`。
+- `--radius`：相机光心到 `target_point` 的球面半径（单位：米），可设置多个值。
+- `--max_angle_deg`：相机光心方向与 `view_axis` 的最大夹角（单位：度）。
+- `--num_polar`：极角方向采样数量，包含中心方向和最大夹角边界。
+- `--num_azimuth`：每个非零极角圆环上的方位角采样数量。
+- `--view_axis`：基座坐标系下相机光心所在半球的参考轴，默认基座 `+Z`。
+- `--project_axis`：选择相机 O-X 或 O-Y 轴的 XOY 平面投影方向对齐到目标投影方向（可选 `x` 或 `y`）。
+- `--min_otc_angle_deg`：基座 XOY 平面中角 O-T-C 的最小允许值，小于该角度的相机位姿会被剔除。
+- `--gripper_dist`：写入 action 模板的夹爪距离（单位：米）。
+- `--arm_ip`：机械臂 IP 地址（若未设置，则使用 `arm_index`）。
+- `--speed_level`：机械臂速度等级。
+- `--overwrite`：允许覆盖 `tmpl_dir` 下已有的同名 JSON 文件。
+- `--visualize`：使用 Open3D 可视化所有逆解可达的末端位姿和相机视线。
+- `--vis_frame_size`：Open3D 可视化中的坐标系尺寸（单位：米）。
+
+输出内容：
+
+- `tmpl_dir/0.json`、`tmpl_dir/1.json` ...
+- 每个模板包含 `T_base_end`、`joints`、`gripper_dist`、`T_base_cam`、`src_candidate_idx`。
+
+说明：
+
+- 生成的模板可直接交给 `auto_collect.py` 批量执行，用于手眼标定或相机标定的数据采集。
+- 相机位姿生成规则：相机光心位于 `view_axis` 方向的半球面上，相机 Z 轴始终指向 `target_point`，相机 O-X 或 O-Y 轴在基座 XOY 平面上的投影方向对齐到「相机光心投影点指向 `target_point` 投影点」的方向。
+- 使用 `ArmWrapper.inverse_kinematics` 剔除逆运动学无解的位姿。
+
+运行方式：
+
+```bash
+bash examples/common/scripts/create_collect_actions.sh
+```
+
 #### calib_handeye.py
 
 用途：读取机械臂位姿和对应图像，定位标定板后执行手眼标定。
@@ -698,6 +767,35 @@ bash examples/common/scripts/calib_camera.sh
 bash examples/common/scripts/calib_handeye.sh
 ```
 
+#### verify_handeye.py
+
+用途：验证手眼标定结果 $T_{end}^{cam}$ 的准确性。核心思路是通过相机定位标定板获取 $T_{cam}^{board}$，利用手眼标定矩阵计算机械臂应到达的目标位姿，驱动机械臂移动后观察末端是否准确抵达预期位置。
+
+依赖：
+
+- `data/calib/cam_params.json`
+- `data/calib/calib_handeye.json`
+- 录制好的模板文件（`verify_handeye_tmpl.json`）
+
+主要参数：
+
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
+- `--cam_params_path`：相机参数文件路径。
+- `--calib_handeye_path`：手眼标定文件路径。
+- `--tmpl_path`：模板 $T_{cam}^{board}$ 的保存/加载路径。
+- `--calib_board_info`：标定板信息，格式为 `[tag_size, space_size, tag_rows, tag_cols]`。
+- `--color_img_topic`：彩色图像话题。
+- `--init_pose`：初始化末端位姿 `[tx, ty, tz, qx, qy, qz, qw]`。
+- `--refine_num`：迭代细化次数（默认 0）。
+- `--record`：开启录制模式，将当前 $T_{cam}^{board}$ 保存为模板。
+- `--debug`：开启调试模式，每步等待按键确认。
+
+运行方式：
+
+```bash
+bash examples/common/scripts/verify_handeye.sh
+```
+
 #### calib_gripper.py
 
 用途：根据 AprilTag 平面和深度图估计夹爪在相机坐标系下的位姿，并生成 `data/calib/gripper_body.json`。
@@ -709,6 +807,7 @@ bash examples/common/scripts/calib_handeye.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--color_img_topic`：彩色图像话题。
 - `--depth_img_topic`：深度图像话题。
 - `--pc_frame_id`：点云坐标系名称。
@@ -745,6 +844,7 @@ bash examples/common/scripts/calib_gripper.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--color_img_topic`：彩色图像话题。
 - `--tmpl_dir`：模板目录。
 
@@ -802,6 +902,7 @@ bash examples/benchmark/scripts/create_tmpl_grasp_2d.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--color_img_topic`：彩色图像话题。
 - `--tmpl_dir`：模板目录。
 - `--detect_pose`：检测位姿，格式为 `[tx, ty, tz, qx, qy, qz, qw]`。
@@ -838,6 +939,7 @@ bash examples/benchmark/scripts/test_tmpl_grasp_2d.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--color_img_topic`：彩色图像话题。
 - `--depth_img_topic`：深度图像话题。
 - `--tmpl_dir`：模板目录。
@@ -889,6 +991,7 @@ bash examples/benchmark/scripts/create_tmpl_grasp_3d.sh
 
 主要参数：
 
+- `--arm_index`：机械臂索引，用于区分多机械臂系统（默认 0）。
 - `--color_img_topic`：彩色图像话题。
 - `--depth_img_topic`：深度图像话题。
 - `--tmpl_dir`：模板目录。

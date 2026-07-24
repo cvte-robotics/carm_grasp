@@ -14,6 +14,9 @@ echo
 
 ############################################## 参数配置 ##############################################
 
+# 机械臂索引, 用于区分多机械臂系统
+arm_index=0
+
 calib_handeye_path="${root_dir}/demo/data/calib/d405/calib_handeye.json"
 
 tmpl_dir="${root_dir}/data/action/collect_dataset"
@@ -22,6 +25,7 @@ tmpl_dir="${root_dir}/data/action/collect_dataset"
 ############################################## 可执行程序 ##############################################
 
 python3 ${script_dir}/../src/create_collect_actions.py \
+  --arm_index ${arm_index} \
   --calib_handeye_path "${calib_handeye_path}" \
   --tmpl_dir "${tmpl_dir}" \
   --target_point 0.3 0 0 \

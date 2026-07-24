@@ -605,7 +605,7 @@ def run(args: argparse.Namespace) -> None:
                             frame_size=args.vis_frame_size)
     # end if
 
-    arm = ArmWrapper(ip=args.arm_ip, speed_level=args.speed_level)
+    arm = ArmWrapper(ip=args.arm_ip, speed_level=args.speed_level, arm_index=arm_index)
     if not arm.is_connected():
         logging.error(f'{RED}failed to connect to arm, exiting{RESET}')
         sys.exit(1)
@@ -643,6 +643,9 @@ def run(args: argparse.Namespace) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--arm_index', type=int, default=0,
+                        help='机械臂索引, 用于区分多机械臂系统')
+
     parser.add_argument('--calib_handeye_path', type=str, required=True,
                         help='手眼标定文件路径,必须包含 T_armend_cam')
 
@@ -676,8 +679,8 @@ if __name__ == '__main__':
     parser.add_argument('--gripper_dist', type=float, default=0.08,
                         help='写入 action 模板的夹爪距离,单位: 米')
 
-    parser.add_argument('--arm_ip', type=str, default='10.42.0.101',
-                        help='机械臂 IP 地址')
+    parser.add_argument('--arm_ip', type=str, default=None,
+                        help='机械臂 IP 地址( 若未设置, 则使用 arm_index )')
 
     parser.add_argument('--speed_level', type=int, default=50,
                         help='机械臂速度等级')
@@ -693,7 +696,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    arm_index = args.arm_index
+
     print()
+    print(f'arm_index: {BLUE}{arm_index}{RESET}')
     print(f'calib_handeye_path: {BLUE}{args.calib_handeye_path}{RESET}')
     print(f'tmpl_dir: {BLUE}{args.tmpl_dir}{RESET}')
     print(f'target_point: {BLUE}{args.target_point}{RESET}')

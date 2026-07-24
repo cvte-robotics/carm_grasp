@@ -40,28 +40,33 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--calib_handeye_path", type=str, required=True,
+    parser.add_argument("--arm_index", type=int, default=0,
+                        help="机械臂索引, 用于区分多机械臂系统")
+
+    parser.add_argument("--calib_handeye_path", type=str,
                         help="手眼标定文件的路径, 包含相机与机械臂的位姿关系")
 
-    parser.add_argument("--gripper_path", type=str, required=True,
+    parser.add_argument("--gripper_path", type=str,
                         help="夹爪标定文件的路径, 包含夹爪的尺寸和位姿信息")
 
-    parser.add_argument("--frame_id", type=str, required=True,
+    parser.add_argument("--frame_id", type=str,
                         default="base_link",
                         help="机械臂发布位姿的坐标系的名称")
 
-    parser.add_argument("--pc_frame_id", type=str, required=True,
+    parser.add_argument("--pc_frame_id", type=str,
                         help="点云所在的坐标系名称")
 
     args = parser.parse_args()
 
-    calib_handeye_path = args.calib_handeye_path
-    gripper_path = args.gripper_path
+    arm_index = args.arm_index
 
-    frame_id = args.frame_id
-    pc_frame_id = args.pc_frame_id
+    calib_handeye_path = reset_empty_str(args.calib_handeye_path)
+    gripper_path = reset_empty_str(args.gripper_path)
+    frame_id = reset_empty_str(args.frame_id)
+    pc_frame_id = reset_empty_str(args.pc_frame_id)
 
     print()
+    print(f'arm index: {BLUE}{arm_index}{RESET}')
     print(f'calib_handeye_path: {BLUE}{calib_handeye_path}{RESET}')
     print(f'gripper_path: {BLUE}{gripper_path}{RESET}')
     print(f'frame_id: {BLUE}{frame_id}{RESET}')
@@ -69,23 +74,32 @@ if __name__ == '__main__':
     print()
 
     # 读取手眼标定矩阵
-    T_end_cam, _ = read_calib_handeye(calib_handeye_path)
-    print()
+    T_end_cam = None
+    if calib_handeye_path is not None:
+        T_end_cam, _ = read_calib_handeye(calib_handeye_path)
+        if T_end_cam is None:
+            logging.error(f'\033[91mfailed to read calib_handeye_path: {calib_handeye_path}, exiting \033[0m')   # 红色打印
+            exit(1)
+        # end if
+        print()
+    # end if
 
     # 读取夹爪模型
-    gripper_data_dict = mmengine.load(gripper_path)
-    gripper_width = gripper_data_dict['width']
-    gripper_thickness = gripper_data_dict['thickness']
-    T_cam_gripper = np.array(gripper_data_dict['T_cam_gripper'], dtype=np.float32)
-    gripper_body = GripperBody(width=gripper_width,
-                               thickness=gripper_thickness,
-                               T_cam_gripper=T_cam_gripper)
-    logging.info(f"gripper width: {GREEN}{gripper_body.width}{RESET}, thickness: {GREEN}{gripper_body.thickness}{RESET}")
-    logging.info(f"T_cam_gripper: \n{GREEN}{gripper_body.T_cam_gripper}{RESET}")
-    print()
+    if gripper_path is not None:
+        gripper_data_dict = mmengine.load(gripper_path)
+        gripper_width = gripper_data_dict['width']
+        gripper_thickness = gripper_data_dict['thickness']
+        T_cam_gripper = np.array(gripper_data_dict['T_cam_gripper'], dtype=np.float32)
+        gripper_body = GripperBody(width=gripper_width,
+                                   thickness=gripper_thickness,
+                                   T_cam_gripper=T_cam_gripper)
+        logging.info(f"gripper width: {GREEN}{gripper_body.width}{RESET}, thickness: {GREEN}{gripper_body.thickness}{RESET}")
+        logging.info(f"T_cam_gripper: \n{GREEN}{gripper_body.T_cam_gripper}{RESET}")
+        print()
+    # end if
 
     # 创建机械臂对象
-    arm = ArmWrapper()
+    arm = ArmWrapper(arm_index=arm_index)
     if not arm.is_connected():
         logging.error('\033[91mfailed to connect to arm, exiting \033[0m')   # 红色打印
         exit(1)
@@ -119,15 +133,20 @@ if __name__ == '__main__':
 
         arm_node.publish_pose(T_base_end)  # 发布机械臂末端位姿
         arm_node.publish_joints(joints)  # 发布机械臂关节角度
-        arm_node.publish_grippers(gripper_body,
-                                  gripper_dist,
-                                  T_base_end,
-                                  T_end_cam)  # 发布机械爪
 
-        T_base_cam = T_base_end @ T_end_cam
-        ts = pose_to_transform_stamped(arm_node.frame_id, pc_frame_id, T_base_cam)
-        ts.header.stamp = arm_node.get_clock().now().to_msg()
-        tf_broadcaster.sendTransform(ts)
+        if gripper_path is not None and T_end_cam is not None:
+            arm_node.publish_grippers(gripper_body,
+                                      gripper_dist,
+                                      T_base_end,
+                                      T_end_cam)  # 发布机械爪
+        # end if
+
+        if pc_frame_id is not None and T_end_cam is not None:
+            T_base_cam = T_base_end @ T_end_cam
+            ts = pose_to_transform_stamped(arm_node.frame_id, pc_frame_id, T_base_cam)
+            ts.header.stamp = arm_node.get_clock().now().to_msg()
+            tf_broadcaster.sendTransform(ts)
+        # end if
 
         rclpy.spin_once(arm_node, timeout_sec=0.05)
 
@@ -169,7 +188,7 @@ if __name__ == '__main__':
         # end if
 
         # 调整末端,使相机坐标系的 Z 轴指向下方
-        if key == 'c':
+        if key == 'c' and T_end_cam is not None:
             target_T_base_end = compute_axis_aligned_pose(T_base_end, base_axis_idx=-3, obj_axis_idx=3, T_end_obj=T_end_cam)
             if target_T_base_end is None:
                 continue

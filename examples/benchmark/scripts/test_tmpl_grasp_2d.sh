@@ -14,6 +14,9 @@ echo
 
 ############################################## 参数配置 ##############################################
 
+# 机械臂索引, 用于区分多机械臂系统
+arm_index=0
+
 # RGB-D 相机参数文件路径
 cam_params_path="${root_dir}/demo/data/calib/g305/cam_params.json" 
 # cam_params_path="${root_dir}/data/calib/cam_params.json" 
@@ -39,6 +42,7 @@ place_pose="[0.06029420, 0.28073100, 0.25423200, 0.72462909, 0.68913908, -0.0000
 ############################################## 可执行程序 ##############################################
 
 python3 ${script_dir}/../src/test_tmpl_grasp_2d.py \
+    --arm_index ${arm_index} \
     --cam_params_path ${cam_params_path} \
     --calib_handeye_path ${calib_handeye_path} \
     --color_img_topic ${color_img_topic} \

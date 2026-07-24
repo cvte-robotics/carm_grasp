@@ -14,10 +14,14 @@ echo
 
 ############################################## 参数配置 ##############################################
 
-tmpl_dir="${root_dir}/demo/data/action/calib_camera"
+# 机械臂索引, 用于区分多机械臂系统
+arm_index=0
+
+tmpl_dir="${root_dir}/tmp/data/action/calib_handeye"
 
 
 ############################################## 可执行程序 ##############################################
 
 python3 ${script_dir}/../src/action_record.py \
+    --arm_index ${arm_index} \
     --tmpl_dir "${tmpl_dir}" 

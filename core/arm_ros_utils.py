@@ -220,7 +220,7 @@ class ArmNode(Node):
         """
         发布机械臂的状态信息, 包括位姿和关节角度
         Args:
-            joints (List[float]): 机械臂的关节角度列表,长度为 6
+            joints (List[float]): 机械臂的关节角度列表
         """
 
         if self.arm_joint_pub is None:

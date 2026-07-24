@@ -45,6 +45,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--arm_index", type=int, default=0,
+                        help="机械臂索引, 用于区分多机械臂系统")
+
     parser.add_argument("--cam_params_path", type=str, required=True,
                         help="相机参数文件的路径, 包含内参和畸变参数")
 
@@ -61,6 +64,8 @@ if __name__ == '__main__':
                         help="模板文件的目录")
 
     args = parser.parse_args()
+
+    arm_index = args.arm_index
 
     cam_params_path = args.cam_params_path
     calib_handeye_path = args.calib_handeye_path
@@ -84,6 +89,7 @@ if __name__ == '__main__':
     # end if
 
     print()
+    print(f'arm index: {BLUE}{arm_index}{RESET}')
     print(f"RGB-D camera parameters file: {BLUE}{cam_params_path}{RESET}")
     print(f"handeye calib file: {BLUE}{calib_handeye_path}{RESET}")
     print(f"color image topic: {BLUE}{color_img_topic}{RESET}")
@@ -114,7 +120,7 @@ if __name__ == '__main__':
     # end if
 
     # 创建机械臂对象
-    arm = ArmWrapper()
+    arm = ArmWrapper(arm_index=arm_index)
     if not arm.is_connected():
         logging.error(f'{RED}failed to connect to arm, exiting{RESET}')   # 红色打印
         exit(1)

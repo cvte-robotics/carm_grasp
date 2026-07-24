@@ -107,12 +107,17 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--arm_index", type=int, default=0,
+                        help="机械臂索引, 用于区分多机械臂系统")
+
     parser.add_argument("--tmpl_dir", type=str,
                         help="保存模板文件的目录")
 
     args = parser.parse_args()
 
     # 解析参数
+    arm_index = args.arm_index
+
     tmpl_dir = args.tmpl_dir
     if tmpl_dir is None:
         logging.error('no tmpl_dir specified, exiting')
@@ -120,6 +125,7 @@ if __name__ == '__main__':
     # end if
 
     print()
+    print(f'arm index: {BLUE}{arm_index}{RESET}')
     print(f'action template will be saved to: {GREEN}{tmpl_dir}{RESET}')
     print()
 
@@ -128,7 +134,7 @@ if __name__ == '__main__':
     os.makedirs(tmpl_dir, exist_ok=True)
 
     # 创建机械臂对象
-    arm = ArmWrapper()
+    arm = ArmWrapper(arm_index=arm_index)
     if not arm.is_connected():
         logging.error(f'{RED}failed to connect to arm, exiting {RESET}')
         exit(1)

@@ -14,27 +14,31 @@ echo
 
 ############################################## 参数配置 ##############################################
 
-# 相机图像话题列表
-# img_topic_list=(
-#     "/realsense/d405/color/image_rect_raw"
-#     "/realsense/d405/aligned_depth_to_color/image_raw"
-# )
+# 机械臂索引, 用于区分多机械臂系统
+arm_index=0
 
+# 相机图像话题列表
 img_topic_list=(
-    /gemini305/color/image_raw
-    /gemini305/depth/image_raw
+    "/realsense/d405/color/image_rect_raw"
+    "/realsense/d405/aligned_depth_to_color/image_raw"
 )
 
+# img_topic_list=(
+#     /gemini305/color/image_raw
+#     /gemini305/depth/image_raw
+# )
+
 # 机械臂动作模板文件夹路径
-tmpl_dir="${root_dir}/data/action/calib_handeye"
+tmpl_dir="${root_dir}/tmp/data/action/calib_handeye"
 
 # 数据保存路径
-data_dir="${root_dir}/results/auto_collect/g305/calib_handeye"
+data_dir="${root_dir}/tmp/auto_collect/d405/calib_handeye"
 
 
 ############################################## 可执行程序 ##############################################
 
 python3 ${script_dir}/../src/auto_collect.py \
+    --arm_index ${arm_index} \
     --tmpl_dir "${tmpl_dir}" \
     --img_topic_list "${img_topic_list[@]}" \
     --data_dir "${data_dir}" \
